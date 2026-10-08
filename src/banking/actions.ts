@@ -4,6 +4,7 @@ import { appDb } from '../db';
 import { HttpError } from '../auth';
 import { person } from '../people';
 import { authorizeTransfer } from './authorization';
+import { storedIntent, existingIntentResult } from './intents';
 import { dispatchTransfer, PendingVerificationError } from './dispatch';
 import { recordEvent } from '../telemetry';
 import type { ActionResult, ToolContext } from '../types';
@@ -28,13 +29,9 @@ export async function transferMoney(ctx: ToolContext, args: unknown): Promise<Ac
     userId: ctx.userId,
     input,
   });
-  const previous = db
-    .prepare('SELECT user_id,payload,bank_reference,status FROM intents WHERE id=?')
-    .get(ctx.intentId) as
-    { user_id: string; payload: string; bank_reference: string | null; status: string } | undefined;
-  if (previous && (previous.user_id !== ctx.userId || previous.payload !== JSON.stringify(input)))
-    throw new HttpError(409, 'This intent belongs to a different payload.');
-  if (previous?.status === 'cancelled') throw new HttpError(409, 'This intent was cancelled.');
+  const previous = storedIntent(ctx, input);
+  const existing = existingIntentResult(ctx, previous);
+  if (existing) return existing;
   const proposedReference = previous?.bank_reference || randomUUID();
   traceLog('transfer', previous ? 'intent.reused' : 'intent.created', {
     runId: ctx.runId,
@@ -79,10 +76,6 @@ export async function transferMoney(ctx: ToolContext, args: unknown): Promise<Ac
     permission: permission || 'authorized',
   });
   if (permission) return permission;
-  const processing = db
-    .prepare("UPDATE intents SET status=? WHERE id=? AND status!='cancelled'")
-    .run('processing', ctx.intentId);
-  if (!processing.changes) throw new HttpError(409, 'This intent was cancelled.');
   recordEvent(ctx, 'transfer.started', { status: 'processing', input, intentId: ctx.intentId });
   try {
     traceLog('transfer', 'dispatch.started', {
@@ -91,16 +84,18 @@ export async function transferMoney(ctx: ToolContext, args: unknown): Promise<Ac
       userId: ctx.userId,
     });
     const operation = await dispatchTransfer(ctx, input, bankReference);
-    db.prepare('UPDATE intents SET status=?,operation_id=?,error=NULL WHERE id=?').run(
-      'completed',
-      operation.id,
-      ctx.intentId,
-    );
-    recordEvent(ctx, 'transfer.completed', {
-      status: 'completed',
-      operation,
-      intentId: ctx.intentId,
-    });
+    db.transaction(() => {
+      db.prepare('UPDATE intents SET status=?,operation_id=?,error=NULL WHERE id=?').run(
+        'completed',
+        operation.id,
+        ctx.intentId,
+      );
+      recordEvent(ctx, 'transfer.completed', {
+        status: 'completed',
+        operation,
+        intentId: ctx.intentId,
+      });
+    }).immediate();
     return { status: 'completed', operation, intentId: ctx.intentId };
   } catch (e) {
     const message = e instanceof Error ? e.message : 'Transfer error';

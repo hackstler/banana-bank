@@ -483,6 +483,313 @@ test('normal: bank rejection does not make a consumed approval reusable', async 
   assert.match(history.data.messages[0].content, /Insufficient funds/);
 });
 
+for (const status of ['completed', 'failed'] as const) {
+  test(`normal: repeating a resolved ${status} intent preserves its result without another execution`, async () => {
+    const intentId = `resolved-${status}`;
+    const args = { ...input, amountCents: status === 'failed' ? 10000000 : 1000 };
+    const conversation = await api('conversations', {});
+    const action = {
+      name: 'transfer_money',
+      arguments: args,
+      intentId,
+      conversationId: conversation.data.id,
+    };
+    const proposal = await api('actions', action);
+    assert.equal(proposal.data.status, 'requires_confirmation');
+    const first = await api(`approvals/${proposal.data.approvalId}/confirm`, {});
+    assert.equal(first.data.status, status);
+    const db = appDb();
+    const persistedBefore = db.prepare('SELECT * FROM intents WHERE id=?').get(intentId) as any;
+    const approvalsBefore = db
+      .prepare('SELECT * FROM approvals WHERE intent_id=? ORDER BY rowid')
+      .all(intentId);
+    const before = await api('dashboard');
+    const destinationBefore = await bankRequest<any[]>('carla', '/v1/accounts');
+    const operationsBefore = await bankRequest<any>('marta', '/v1/operator/customer?id=ines');
+    const historyBefore = await api(`conversations/${conversation.data.id}`);
+    const originalFetch = globalThis.fetch;
+    const bankRequests: { path: string; method: string; reference?: string }[] = [];
+    globalThis.fetch = (async (resource, init) => {
+      const url = new URL(String(resource));
+      bankRequests.push({
+        path: url.pathname,
+        method: init?.method || 'GET',
+        reference: init?.body ? JSON.parse(String(init.body)).reference : undefined,
+      });
+      return originalFetch(resource, init);
+    }) as typeof fetch;
+    let repeated, afterRepeat, repeatedConfirmation;
+    try {
+      repeated = await api('actions', action);
+      afterRepeat = db.prepare('SELECT * FROM intents WHERE id=?').get(intentId);
+      // Before the fix this exposes the reopened proposal and redundant bank execution.
+      if (repeated.data.status === 'requires_confirmation')
+        repeatedConfirmation = await api(`approvals/${repeated.data.approvalId}/confirm`, {});
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+    const after = await api('dashboard');
+    const destinationAfter = await bankRequest<any[]>('carla', '/v1/accounts');
+    const operationsAfter = await bankRequest<any>('marta', '/v1/operator/customer?id=ines');
+    const historyAfter = await api(`conversations/${conversation.data.id}`);
+    const approvalsAfter = db
+      .prepare('SELECT * FROM approvals WHERE intent_id=? ORDER BY rowid')
+      .all(intentId);
+    console.log(
+      'intent.reuse.evidence',
+      JSON.stringify({
+        profile: 'normal',
+        intentId,
+        first: first.data,
+        repeated: repeated.data,
+        stateBefore: persistedBefore,
+        stateAfterRepeat: afterRepeat,
+        repeatedConfirmation: repeatedConfirmation?.data,
+        bankRequests,
+        approvalsBefore: approvalsBefore.length,
+        approvalsAfter: approvalsAfter.length,
+        balanceBefore: before.data.accounts[0].balanceCents,
+        balanceAfter: after.data.accounts[0].balanceCents,
+        newOperations: operationsAfter.operations.length - operationsBefore.operations.length,
+        messagesBefore: historyBefore.data.messages.length,
+        messagesAfter: historyAfter.data.messages.length,
+      }),
+    );
+    assert.deepEqual(after.data.accounts, before.data.accounts);
+    assert.deepEqual(after.data.movements, before.data.movements);
+    assert.deepEqual(destinationAfter, destinationBefore);
+    assert.deepEqual(operationsAfter.operations, operationsBefore.operations);
+    if (status === 'completed') {
+      const operation = await bankRequest<any>(
+        'ines',
+        `/v1/operations/${persistedBefore.bank_reference}`,
+      );
+      assert.equal(operation.id, persistedBefore.operation_id);
+      assert.equal(operation.id, first.data.operation.id);
+    } else {
+      assert.match(first.data.error, /Insufficient funds/);
+      await assert.rejects(
+        bankRequest('ines', `/v1/operations/${persistedBefore.bank_reference}`),
+        (error: unknown) => error instanceof BankError && error.status === 404,
+      );
+    }
+    assert.equal(repeated.status, 200);
+    assert.equal(repeated.data.status, status);
+    if (status === 'completed') assert.deepEqual(repeated.data.operation, first.data.operation);
+    else assert.equal(repeated.data.error, first.data.error);
+    assert.deepEqual(afterRepeat, persistedBefore);
+    assert.deepEqual(approvalsAfter, approvalsBefore);
+    assert.deepEqual(historyAfter.data.messages, historyBefore.data.messages);
+    assert.deepEqual(bankRequests, []);
+    // Re-open SQLite and make network access fail: the result must be durable and local.
+    let blockedRequests = 0;
+    globalThis.fetch = (async () => {
+      blockedRequests += 1;
+      throw new Error('Bank deliberately unavailable in the replay test.');
+    }) as typeof fetch;
+    try {
+      closeAppDb();
+      const simultaneous = await Promise.all([api('actions', action), api('actions', action)]);
+      for (const result of simultaneous) assert.deepEqual(result.data, repeated.data);
+      const altered = await api('actions', {
+        ...action,
+        arguments: { ...args, concept: 'changed' },
+      });
+      assert.equal(altered.data.status, 'failed');
+      assert.match(altered.data.error, /different payload/);
+      const foreign = await api(
+        'actions',
+        { name: 'transfer_money', arguments: args, intentId },
+        'bruno',
+      );
+      assert.equal(foreign.data.status, 'failed');
+      assert.equal(foreign.data.operation, undefined);
+      assert.match(foreign.data.error, /different payload/);
+      assert.equal((await api('actions', action, 'marta')).status, 403);
+      assert.equal(blockedRequests, 0);
+      assert.deepEqual(
+        appDb().prepare('SELECT * FROM intents WHERE id=?').get(intentId),
+        persistedBefore,
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+}
+
+test('normal with controlled scheduling: a delayed proposal cannot reopen a completed intent', async () => {
+  const intentId = 'resolved-delayed-proposal';
+  const action = { name: 'transfer_money', arguments: input, intentId };
+  const proposal = await api('actions', action);
+  let entered!: () => void, release!: () => void;
+  const waiting = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const originalFetch = globalThis.fetch;
+  let hold = true;
+  globalThis.fetch = (async (resource, init) => {
+    if (hold && new URL(String(resource)).pathname === '/v1/accounts') {
+      hold = false;
+      entered();
+      await gate;
+    }
+    return originalFetch(resource, init);
+  }) as typeof fetch;
+  let delayed: ReturnType<typeof api> | undefined;
+  try {
+    delayed = api('actions', action);
+    await waiting;
+    const confirmed = await api(`approvals/${proposal.data.approvalId}/confirm`, {});
+    assert.equal(confirmed.data.status, 'completed');
+    const known = appDb().prepare('SELECT * FROM intents WHERE id=?').get(intentId);
+    release();
+    const repeated = await delayed;
+    const after = appDb().prepare('SELECT * FROM intents WHERE id=?').get(intentId);
+    const approvals = appDb().prepare('SELECT id FROM approvals WHERE intent_id=?').all(intentId);
+    console.log(
+      'intent.race.evidence',
+      JSON.stringify({ intentId, known, repeated: repeated.data, after, approvals }),
+    );
+    assert.equal(repeated.data.status, 'completed');
+    assert.deepEqual(repeated.data.operation, confirmed.data.operation);
+    assert.deepEqual(after, known);
+    assert.equal(approvals.length, 1);
+  } finally {
+    release();
+    if (delayed) await delayed;
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('normal with controlled scheduling: an executing intent cannot generate another approval', async () => {
+  const intentId = 'resolved-in-flight';
+  const action = { name: 'transfer_money', arguments: input, intentId };
+  const proposal = await api('actions', action);
+  let entered!: () => void, release!: () => void;
+  const waiting = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const originalFetch = globalThis.fetch;
+  let postCount = 0;
+  globalThis.fetch = (async (resource, init) => {
+    if (new URL(String(resource)).pathname === '/v1/transfers') {
+      postCount += 1;
+      entered();
+      await gate;
+    }
+    return originalFetch(resource, init);
+  }) as typeof fetch;
+  let execution: ReturnType<typeof api> | undefined;
+  try {
+    execution = api(`approvals/${proposal.data.approvalId}/confirm`, {});
+    await waiting;
+    const known = appDb().prepare('SELECT * FROM intents WHERE id=?').get(intentId);
+    const repeated = await api('actions', action);
+    const after = appDb().prepare('SELECT * FROM intents WHERE id=?').get(intentId);
+    const approvals = appDb().prepare('SELECT id FROM approvals WHERE intent_id=?').all(intentId);
+    release();
+    const result = await execution;
+    console.log(
+      'intent.processing.evidence',
+      JSON.stringify({ intentId, known, repeated: repeated.data, after, approvals, postCount }),
+    );
+    assert.equal(result.data.status, 'completed');
+    assert.equal(repeated.data.status, 'processing');
+    assert.deepEqual(after, known);
+    assert.equal(approvals.length, 1);
+    assert.equal(postCount, 1);
+  } finally {
+    release();
+    if (execution) await execution;
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('normal: distinct intents with identical payloads remain independent customer operations', async () => {
+  const before = await api('dashboard');
+  const destinationBefore = await bankRequest<any[]>('carla', '/v1/accounts');
+  const operationsBefore = await bankRequest<any>('marta', '/v1/operator/customer?id=ines');
+  const results: { id: string; reference: string }[] = [];
+  for (const intentId of ['legitimate-intent-one', 'legitimate-intent-two']) {
+    const action = { name: 'transfer_money', arguments: input, intentId };
+    const proposal = await api('actions', action);
+    assert.equal(proposal.data.status, 'requires_confirmation');
+    const confirmed = await api(`approvals/${proposal.data.approvalId}/confirm`, {});
+    assert.equal(confirmed.data.status, 'completed');
+    const repeated = await api('actions', action);
+    assert.deepEqual(repeated.data.operation, confirmed.data.operation);
+    const lookup = await bankRequest<any>(
+      'ines',
+      `/v1/operations/${confirmed.data.operation.reference}`,
+    );
+    assert.equal(lookup.id, confirmed.data.operation.id);
+    results.push(confirmed.data.operation);
+  }
+  assert.notEqual(results[0].id, results[1].id);
+  assert.notEqual(results[0].reference, results[1].reference);
+  const after = await api('dashboard');
+  const destinationAfter = await bankRequest<any[]>('carla', '/v1/accounts');
+  assert.equal(after.data.accounts[0].balanceCents, before.data.accounts[0].balanceCents - 2000);
+  assert.equal(destinationAfter[0].balanceCents, destinationBefore[0].balanceCents + 2000);
+  assert.equal(
+    (await bankRequest<any>('marta', '/v1/operator/customer?id=ines')).operations.length,
+    operationsBefore.operations.length + 2,
+  );
+  const movements = after.data.movements.filter((m: any) =>
+    results.some((op) => op.id === m.operationId),
+  );
+  assert.equal(movements.length, 2);
+  assert.ok(movements.every((m: any) => m.amountCents === -1000));
+});
+
+test('legacy telemetry fixture: a completed intent without operation details is not executed again', async () => {
+  const intentId = 'resolved-legacy-event';
+  const action = { name: 'transfer_money', arguments: input, intentId };
+  const proposal = await api('actions', action);
+  const confirmed = await api(`approvals/${proposal.data.approvalId}/confirm`, {});
+  assert.equal(confirmed.data.status, 'completed');
+  // The starter's telemetry retained only status/tool. Reproduce that historical app data locally.
+  appDb()
+    .prepare(
+      "UPDATE events SET data=? WHERE kind='transfer.completed' AND json_extract(data,'$.intentId')=?",
+    )
+    .run(JSON.stringify({ status: 'completed' }), intentId);
+  const intent = appDb().prepare('SELECT * FROM intents WHERE id=?').get(intentId) as any;
+  const before = await api('dashboard');
+  const originalFetch = globalThis.fetch;
+  let bankRequests = 0;
+  globalThis.fetch = (async () => {
+    bankRequests += 1;
+    throw new Error('Bank must not be needed to replay a known historical result.');
+  }) as typeof fetch;
+  try {
+    const result = await api('actions', action);
+    assert.equal(result.data.status, 'completed');
+    assert.equal(result.data.operationId, confirmed.data.operation.id);
+    assert.equal(result.data.bankReference, confirmed.data.operation.reference);
+    assert.deepEqual(result.data.payload, input);
+    assert.equal(result.data.operation, undefined);
+    assert.equal(result.data.createdAt, undefined);
+    assert.equal(bankRequests, 0);
+    assert.deepEqual(appDb().prepare('SELECT * FROM intents WHERE id=?').get(intentId), intent);
+    assert.equal(
+      appDb().prepare('SELECT id FROM approvals WHERE intent_id=?').all(intentId).length,
+      1,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  const after = await api('dashboard');
+  assert.deepEqual(after.data.accounts, before.data.accounts);
+  assert.deepEqual(after.data.movements, before.data.movements);
+});
+
 test('read-unavailable: conversational feedback preserves the unverified result', async () => {
   const profile = await fetch(`${config.bankUrl}/admin/scenario`, {
     method: 'POST',
@@ -517,6 +824,36 @@ test('read-unavailable: conversational feedback preserves the unverified result'
     (await api(`conversations/${conversation.data.id}`)).data.messages,
     history.data.messages,
   );
+  const persisted = appDb().prepare('SELECT * FROM intents WHERE id=?').get('pending-feedback');
+  const originalFetch = globalThis.fetch;
+  let bankRequests = 0;
+  globalThis.fetch = (async () => {
+    bankRequests += 1;
+    throw new Error(
+      'Repeating an unresolved intent must not dispatch or reconcile it in this task.',
+    );
+  }) as typeof fetch;
+  try {
+    const repeated = await api('actions', {
+      name: 'transfer_money',
+      arguments: input,
+      intentId: 'pending-feedback',
+    });
+    assert.equal(repeated.data.status, 'pending_verification');
+    assert.equal(repeated.data.bankReference, result.data.bankReference);
+    assert.equal(repeated.data.error, result.data.error);
+    assert.equal(bankRequests, 0);
+    assert.deepEqual(
+      appDb().prepare('SELECT * FROM intents WHERE id=?').get('pending-feedback'),
+      persisted,
+    );
+    assert.equal(
+      appDb().prepare('SELECT id FROM approvals WHERE intent_id=?').all('pending-feedback').length,
+      1,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 after(async () => {

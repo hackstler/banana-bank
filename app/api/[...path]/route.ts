@@ -218,6 +218,7 @@ async function handler(request: Request, context: RouteContext) {
         .get(approval.intent_id, current.id) as any;
       if (!intent) throw new HttpError(404, 'Intent not found.');
       if (intent.status === 'cancelled') throw new HttpError(409, 'This proposal was cancelled.');
+      if (approval.consumed_at) throw new HttpError(409, 'This proposal was already confirmed.');
       const runId = randomUUID();
       const result = await transferMoney(
         {

@@ -2,13 +2,14 @@
 
 Chuleta: primero enseñar el fallo en la versión anterior y repetir la petición en la corregida. Importar los `curl` en Postman si se prefiere; conservar la cookie de `/api/session` y sustituir las variables por sus valores.
 
-| Caso                                 | Antes     | Después               |
-| ------------------------------------ | --------- | --------------------- |
-| 1. Transferencia duplicada por retry | `684d232` | `cbbd64a` o posterior |
-| 2. Transferencia sin confirmación    | `cbbd64a` | `53e6e5f` o posterior |
-| 3. Aprobación reutilizable           | `53e6e5f` | `2f40bb6`             |
+| Caso                                     | Antes     | Después                                             |
+| ---------------------------------------- | --------- | --------------------------------------------------- |
+| 1. Transferencia duplicada por retry     | `684d232` | `cbbd64a` o posterior                               |
+| 2. Transferencia sin confirmación        | `cbbd64a` | `53e6e5f` o posterior                               |
+| 3. Aprobación reutilizable               | `53e6e5f` | `2f40bb6`                                           |
+| 4. Intent resuelto que se vuelve a abrir | `af402e0` | Este commit: `fix: reuse resolved transfer intents` |
 
-Para comparar con los **mismos intentId**, usar datos de demo nuevos en cada versión. Conservar una referencia ya ejecutada hace que el banco devuelva un replay y no active el fallo. Cambiar de profile reinicia el contador, **no** los saldos. No ejecutar `reset` sobre datos que quieras conservar.
+Para comparar con los **mismos intentId**, usar datos de demo nuevos en cada versión. Conservar una referencia ya ejecutada hace que el banco devuelva un replay y no active el fallo. En el caso 4, primero resolver el intent y luego repetirlo **sin limpiar los datos**, porque esa repetición es precisamente lo que comprobamos. Cambiar de profile reinicia el contador, **no** los saldos. No ejecutar `reset` sobre datos que quieras conservar.
 
 ## Preparación
 
@@ -47,7 +48,7 @@ demo_db() {
     import Database from "better-sqlite3"; import path from "node:path"; import {config} from "./src/config.ts";
     const db=new Database(path.join(config.dataDir,"app.sqlite"),{readonly:true});
     const id=process.env.DEMO_INTENT;
-    console.log(JSON.stringify({intent:db.prepare("SELECT id,user_id,status,payload,bank_reference,operation_id FROM intents WHERE id=?").get(id)??null,
+    console.log(JSON.stringify({intent:db.prepare("SELECT id,user_id,status,payload,bank_reference,operation_id,error FROM intents WHERE id=?").get(id)??null,
       approvals:db.prepare("SELECT id,intent_id,payload,consumed_at FROM approvals WHERE intent_id=? ORDER BY rowid DESC").all(id)},null,2));db.close();'
 }
 
@@ -258,6 +259,119 @@ curl -sS -b "$DEMO_FILES/ines.cookies" \
 
 Esperado: `status:failed`, `This intent belongs to a different payload.`, ningún nuevo movimiento. Esta protección en la API **ya existía**; la comprobación añadida de los cuatro campos está en el helper interno y se valida con una prueba focalizada, no inventando una vulnerabilidad pública.
 
+## 4. Repetir un intent cuyo resultado ya conocemos
+
+**Qué encontramos / error:** consumir una aprobación no impedía volver a llamar a `/api/actions` con el mismo intent. En `af402e0`, un intent `completed` o `failed` volvía a `requires_confirmation`, generaba otra aprobación y permitía otra ejecución. En el completado, el banco devolvía `replay:true`: no había otro cargo, pero sí otra petición y otro mensaje de resultado.
+
+**Ensayo:** «La transferencia ya tiene resultado. Voy a repetir exactamente el mismo intent, no a pedir un pago nuevo. Antes se abría otra propuesta; ahora recibimos el resultado guardado, sin tocar el banco».
+
+### Antes: resolver y repetir con normal
+
+Ejecutar la preparación común. Este caso no necesita un fallo bancario ni un mensaje del modelo. Los IDs y payload son los de las pruebas `resolved-completed` y `resolved-failed`.
+
+```sh
+export DEMO_INTENT=resolved-completed
+export DEMO_CONCEPT=test
+npm run scenario -- normal
+DEMO_CONVERSATION=$(curl -sS -b "$DEMO_FILES/ines.cookies" \
+  -H 'Content-Type: application/json' -d '{}' \
+  "$DEMO_APP/api/conversations" | json_field id)
+DEMO_ACTION="{\"name\":\"transfer_money\",\"intentId\":\"resolved-completed\",\"conversationId\":\"$DEMO_CONVERSATION\",\"arguments\":{\"fromAccountId\":\"acc-ines\",\"toAccountId\":\"acc-carla\",\"amountCents\":1000,\"concept\":\"test\"}}"
+
+# Crear la propuesta y confirmar una sola vez: ambas versiones deben completar el pago.
+curl -sS -b "$DEMO_FILES/ines.cookies" -H 'Content-Type: application/json' \
+  -d "$DEMO_ACTION" "$DEMO_APP/api/actions"
+DEMO_APPROVAL=$(demo_db | json_field approvals.0.id)
+curl -sS -b "$DEMO_FILES/ines.cookies" -X POST \
+  "$DEMO_APP/api/approvals/$DEMO_APPROVAL/confirm" | tee "$DEMO_FILES/intent-first.json"
+DEMO_REFERENCE=$(demo_db | json_field intent.bank_reference)
+demo_db | tee "$DEMO_FILES/intent-before.json"
+demo_bank | tee "$DEMO_FILES/bank-before-repeat.json"
+
+# Misma petición, mismo intentId y mismo payload. NO reset ni nueva referencia.
+curl -sS -b "$DEMO_FILES/ines.cookies" -H 'Content-Type: application/json' \
+  -d "$DEMO_ACTION" "$DEMO_APP/api/actions" | tee "$DEMO_FILES/intent-repeat.json"
+demo_db
+
+# Solo en la versión rota se abre una segunda propuesta: mostrar que llega al banco.
+if [ "$(json_field status < "$DEMO_FILES/intent-repeat.json")" = requires_confirmation ]; then
+  DEMO_SECOND_APPROVAL=$(demo_db | json_field approvals.0.id)
+  curl -sS -b "$DEMO_FILES/ines.cookies" -X POST \
+    "$DEMO_APP/api/approvals/$DEMO_SECOND_APPROVAL/confirm"
+fi
+
+demo_db
+demo_bank
+curl -sS -b "$DEMO_FILES/ines.cookies" \
+  "$DEMO_APP/api/conversations/$DEMO_CONVERSATION"
+curl -sS -b "$DEMO_FILES/ines.cookies" -H 'Content-Type: application/json' \
+  -d "{\"name\":\"operation_status\",\"arguments\":{\"reference\":\"$DEMO_REFERENCE\"}}" \
+  "$DEMO_APP/api/actions"
+```
+
+**Cómo observarlo antes:** tras repetir `/api/actions`, el estado pasa de `completed` a `requires_confirmation` y hay dos aprobaciones. Confirmar la nueva devuelve el mismo ID bancario con `replay:true` y duplica el mensaje del chat. Los saldos y movimientos no cambian respecto al primer pago: el banco ya evita multiplicar sus efectos, pero la aplicación reejecuta un intent resuelto.
+
+### Después: mismo ensayo, sin reabrir ni reenviar
+
+Cambiar a la versión corregida con una BD de demo nueva y repetir **todo el bloque anterior**. La primera confirmación ejecuta el pago; la repetición de `/api/actions` devuelve `completed` con la misma operación, por lo que no entra al bloque de segunda confirmación.
+
+| Comprobación tras repetir                     | Antes                                      | Después                      |
+| --------------------------------------------- | ------------------------------------------ | ---------------------------- |
+| Respuesta de `/api/actions`                   | `requires_confirmation`                    | `completed`, misma operación |
+| Aprobaciones del intent                       | 1 → 2                                      | Sigue habiendo 1, consumida  |
+| Peticiones al banco por repetir y reconfirmar | 2 GET de cuentas + 1 POST de transferencia | 0                            |
+| Mensajes de resultado                         | 1 → 2                                      | Sigue habiendo 1             |
+| Referencia e ID bancario                      | Mismos, el banco responde replay           | Mismos, leídos localmente    |
+| Saldo y movimientos respecto al primer pago   | Sin nuevos cargos                          | Sin nuevos cargos            |
+
+La consulta final por referencia y `demo_bank` son **lecturas de comprobación de la demo**; no confundirlas con llamadas del flujo repetido. En los logs del run de repetición, buscar `intent.result_reused`: no debe aparecer un dispatch ni una autorización bancaria para ese run.
+
+**Cómo se solucionó:** `src/banking/intents.ts` valida usuario y payload antes de devolver el resultado persistido. Para `completed`, reutiliza la operación del evento ya guardado; en históricos sin ese detalle devuelve únicamente los IDs, referencia y payload conocidos, sin inventar fechas ni consultar el banco. `failed` conserva su error. `processing` y `pending_verification` conservan su estado sin iniciar otra ejecución ni reconciliarlo.
+
+`src/banking/actions.ts` aplica el guard al entrar. `src/banking/authorization.ts` vuelve a comprobar el estado bajo una transacción después del GET de titularidad, para que una petición retrasada no sobrescriba un resultado recién completado. Consumir la aprobación y pasar a `processing` es atómico. Guardar `completed` y su evento también. El endpoint de confirmación sigue devolviendo `409` para una aprobación consumida.
+
+### Variante: rechazo conocido por saldo insuficiente
+
+En la misma sesión, preparar otro intent con un importe válido por contrato, pero superior al saldo. No cambiar el payload entre las dos llamadas:
+
+```sh
+export DEMO_INTENT=resolved-failed
+export DEMO_CONCEPT=test
+DEMO_ACTION='{"name":"transfer_money","intentId":"resolved-failed","arguments":{"fromAccountId":"acc-ines","toAccountId":"acc-carla","amountCents":10000000,"concept":"test"}}'
+curl -sS -b "$DEMO_FILES/ines.cookies" -H 'Content-Type: application/json' \
+  -d "$DEMO_ACTION" "$DEMO_APP/api/actions"
+DEMO_APPROVAL=$(demo_db | json_field approvals.0.id)
+curl -sS -b "$DEMO_FILES/ines.cookies" -X POST \
+  "$DEMO_APP/api/approvals/$DEMO_APPROVAL/confirm"
+demo_db
+
+curl -sS -b "$DEMO_FILES/ines.cookies" -H 'Content-Type: application/json' \
+  -d "$DEMO_ACTION" "$DEMO_APP/api/actions"
+demo_db
+demo_bank
+```
+
+**Antes:** `failed` → nueva propuesta `requires_confirmation`. **Después:** `failed` con el mismo `Insufficient funds.`, una aprobación consumida, sin llamadas bancarias nuevas ni movimientos. Esta tarea preserva estados persistidos; no reclasifica fallos históricos ambiguos, que quedan para reconciliación.
+
+### Evidencia y pruebas técnicas
+
+Ensayos reales aislados con `resolved-completed`:
+
+- Antes: operación `ba25d8d4-4f4e-447f-83b4-e45ec9df1c44`, referencia `31834d8b-9024-4dcc-b910-06cf1a32b4c5`; se creó otra aprobación `6c23affb-33e2-4e22-b27b-00886d7e41b4` y se volvió a enviar al banco.
+- Después: operación `239d4105-8d90-41be-850f-439c25f26882`, referencia `ad2259ec-da4a-4d2e-910b-9440a36c23db`; cero peticiones bancarias por repetir, una aprobación y un mensaje. Saldo antes/después de repetir: `585050` / `585050`.
+
+Son UUID de bancos temporales ya eliminados; para tu demo usar los mismos intentId y cuentas, y extraer los UUID nuevos con `demo_db`.
+
+Casos técnicos sin profile específico: las pruebas pausan una petición HTTP para reproducir una propuesta retrasada y un intent en curso; además bloquean todo acceso bancario y cierran/reabren SQLite para comprobar que el resultado es persistido, no una caché en memoria. Un fixture local representa los eventos antiguos sin detalle de operación. No se modifica `simulator/` ni se añade recuperación automática.
+
+```sh
+TRACE_LOGS=0 node --import tsx --test \
+  --test-name-pattern='resolved|controlled scheduling|distinct intents|legacy telemetry' \
+  tests/transfer-confirmation.test.ts
+```
+
+Las pruebas también comprueban que otro usuario o un payload distinto no recuperan el resultado, y que **dos intentId distintos con el mismo payload siguen siendo dos pagos legítimos**.
+
 ## Evidencia adicional y checks
 
 Ensayo corregido: conversación `a4248cb8-3df1-4e68-bcda-41af34cec2fb`, aprobación `6aa91b10-a541-4b55-ab47-0c011b72e0dd`, operación `d2b25896-1b40-4b1d-8dcd-c82044cc0e80`, referencia `761dd2b6-56aa-46e1-931f-8a35e0976ea2`. Son UUID de datos temporales, no reutilizables tras borrarlos.
@@ -284,6 +398,7 @@ Checks en la versión corregida:
 TRACE_LOGS=0 node --import tsx --test tests/transfer-confirmation.test.ts
 TRACE_LOGS=0 npm test
 npm run typecheck
+npm run build
 ```
 
-Resultado validado: **9/9 focalizadas**, **25/25 totales**, tipos correctos. Los tests también cubren `read-unavailable`, titular/intent incorrectos, saldo insuficiente, cancelación y ausencia de efectos antes de confirmar. Para cerrar la demo, `npm run scenario -- normal`; esto no deshace pagos.
+Resultado validado tras la tarea 3: **15/15 focalizadas**, **31/31 totales**, tipos y build correctos. Antes de la corrección fallaron los cuatro escenarios de reutilización/estado en curso; después pasan. Los tests también cubren `read-unavailable`, titular/intent incorrectos, saldo insuficiente, cancelación y ausencia de efectos antes de confirmar. Para cerrar la demo, `npm run scenario -- normal`; esto no deshace pagos.
