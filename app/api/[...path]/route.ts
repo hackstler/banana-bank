@@ -14,6 +14,8 @@ import { MissingOpenAIKeyError } from '../../../src/retrieval/embeddings';
 import { config } from '../../../src/config';
 import { allChunks } from '../../../src/retrieval/store';
 import { errorDetails, traceLog } from '../../../src/trace';
+import type { Operation } from '../../../src/types';
+import { recordEvent } from '../../../src/telemetry';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 const json = (data: unknown, status = 200, headers: Record<string, string> = {}) =>
@@ -63,7 +65,7 @@ async function handler(request: Request, context: RouteContext) {
       const approvals = (
         db
           .prepare(
-            'SELECT * FROM approvals WHERE user_id=? AND consumed_at IS NULL AND expires_at>?',
+            'SELECT a.*,i.conversation_id AS conversationId,i.run_id AS runId FROM approvals a JOIN intents i ON i.id=a.intent_id WHERE a.user_id=? AND a.consumed_at IS NULL AND a.expires_at>?',
           )
           .all(current.id, new Date().toISOString()) as any[]
       ).map((a) => ({ ...a, payload: JSON.parse(a.payload) }));
@@ -165,6 +167,47 @@ async function handler(request: Request, context: RouteContext) {
         throw error;
       }
     }
+    if (path[0] === 'approvals' && path[1] && path[2] === 'cancel' && request.method === 'POST') {
+      const runId = randomUUID();
+      const result = db.transaction(() => {
+        const approval = db
+          .prepare('SELECT * FROM approvals WHERE id=? AND user_id=?')
+          .get(path[1], current.id) as any;
+        if (!approval) throw new HttpError(404, 'Proposal not found.');
+        const intent = db
+          .prepare('SELECT * FROM intents WHERE id=? AND user_id=?')
+          .get(approval.intent_id, current.id) as any;
+        if (!intent) throw new HttpError(404, 'Intent not found.');
+        const result = { status: 'cancelled', intentId: intent.id, approvalId: approval.id };
+        if (intent.status === 'cancelled') return result;
+        if (approval.consumed_at || intent.status !== 'requires_confirmation')
+          throw new HttpError(409, 'Only an unexecuted proposal can be cancelled.');
+        const now = new Date().toISOString();
+        db.prepare('UPDATE intents SET status=? WHERE id=?').run('cancelled', intent.id);
+        db.prepare('UPDATE approvals SET consumed_at=? WHERE id=?').run(now, approval.id);
+        if (intent.conversation_id)
+          db.prepare('INSERT INTO messages VALUES(?,?,?,?,?,?)').run(
+            randomUUID(),
+            intent.conversation_id,
+            'assistant',
+            'Transfer proposal cancelled. No money was moved.',
+            now,
+            runId,
+          );
+        recordEvent(
+          {
+            userId: current.id,
+            conversationId: intent.conversation_id,
+            runId,
+            intentId: intent.id,
+          },
+          'transfer.cancelled',
+          result,
+        );
+        return result;
+      })();
+      return json(result);
+    }
     if (path[0] === 'approvals' && path[1] && path[2] === 'confirm' && request.method === 'POST') {
       const approval = db
         .prepare('SELECT * FROM approvals WHERE id=? AND user_id=?')
@@ -174,18 +217,48 @@ async function handler(request: Request, context: RouteContext) {
         .prepare('SELECT * FROM intents WHERE id=? AND user_id=?')
         .get(approval.intent_id, current.id) as any;
       if (!intent) throw new HttpError(404, 'Intent not found.');
-      return json(
-        await transferMoney(
-          {
-            userId: current.id,
-            conversationId: intent.conversation_id,
-            runId: randomUUID(),
-            intentId: intent.id,
-            approvalId: approval.id,
-          },
-          JSON.parse(approval.payload),
-        ),
+      if (intent.status === 'cancelled') throw new HttpError(409, 'This proposal was cancelled.');
+      const runId = randomUUID();
+      const result = await transferMoney(
+        {
+          userId: current.id,
+          conversationId: intent.conversation_id,
+          runId,
+          intentId: intent.id,
+          approvalId: approval.id,
+        },
+        JSON.parse(approval.payload),
       );
+      if (result.status === 'completed' || result.status === 'pending_verification')
+        db.prepare('UPDATE approvals SET consumed_at=? WHERE id=?').run(
+          new Date().toISOString(),
+          approval.id,
+        );
+      if (intent.conversation_id) {
+        const operation = result.operation as Operation | undefined;
+        const content =
+          result.status === 'completed' && operation
+            ? `Transfer completed: ${new Intl.NumberFormat('en-IE', { style: 'currency', currency: 'EUR' }).format(operation.amountCents / 100)} from ${operation.fromAccountId} to ${operation.toAccountId}. Concept: ${operation.concept}. Reference: ${operation.reference}.`
+            : result.status === 'pending_verification'
+              ? `Your transfer is pending verification. We cannot yet confirm whether it completed. Do not submit another payment to check it. Reference: ${intent.bank_reference}.`
+              : `The transfer could not be completed: ${result.error || result.status}.`;
+        db.prepare('INSERT INTO messages VALUES(?,?,?,?,?,?)').run(
+          randomUUID(),
+          intent.conversation_id,
+          'assistant',
+          content,
+          new Date().toISOString(),
+          runId,
+        );
+        traceLog('transfer', 'confirmation.message_saved', {
+          runId,
+          intentId: intent.id,
+          approvalId: approval.id,
+          conversationId: intent.conversation_id,
+          status: result.status,
+        });
+      }
+      return json(result);
     }
     if (path[0] === 'incidents') {
       if (current.role !== 'operator') throw new HttpError(403, 'Operator role required.');

@@ -39,6 +39,12 @@ function transferContext(intentId: string) {
     intentId,
   };
 }
+async function confirmedTransfer(intentId: string) {
+  const ctx = transferContext(intentId);
+  const proposal = await transferMoney(ctx, input);
+  assert.equal(proposal.status, 'requires_confirmation');
+  return transferMoney({ ...ctx, approvalId: proposal.approvalId as string }, input);
+}
 test('reset reproduces consistent accounts and transactions', () => {
   seedBank();
   const before = snapshot();
@@ -154,7 +160,7 @@ test('application retries reuse the persisted bank reference', async () => {
     throw new Error(`Unexpected bank request: ${url.pathname}`);
   }) as typeof fetch;
   try {
-    const result = await transferMoney(transferContext('intent-stable-reference'), input);
+    const result = await confirmedTransfer('intent-stable-reference');
     assert.equal(result.status, 'completed');
     assert.equal(postCount, 2);
     assert.equal(references[0], references[1]);
@@ -185,7 +191,7 @@ test('application verifies a committed operation after an ambiguous response', a
     throw new Error(`Unexpected bank request: ${url.pathname}`);
   }) as typeof fetch;
   try {
-    const result = await transferMoney(transferContext('intent-verified'), input);
+    const result = await confirmedTransfer('intent-verified');
     assert.equal(result.status, 'completed');
     assert.equal((result.operation as any).id, 'operation-lost-response');
     assert.equal(postCount, 1);
@@ -210,7 +216,7 @@ test('application keeps an unverifiable transfer pending', async () => {
     throw new Error(`Unexpected bank request: ${url.pathname}`);
   }) as typeof fetch;
   try {
-    const result = await transferMoney(transferContext('intent-pending-verification'), input);
+    const result = await confirmedTransfer('intent-pending-verification');
     assert.equal(result.status, 'pending_verification');
     assert.equal(postCount, 1);
     const intent = appDb()

@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import type { Person } from '../src/types';
 type AnyRecord = Record<string, any>;
 const money = (cents: number) =>
@@ -92,6 +92,8 @@ export default function Home() {
     [messages, setMessages] = useState<AnyRecord[]>([]);
   const [text, setText] = useState(''),
     [busy, setBusy] = useState(false),
+    [confirmingId, setConfirmingId] = useState<string | null>(null),
+    [approvalAction, setApprovalAction] = useState<'confirm' | 'cancel'>('confirm'),
     [error, setError] = useState(''),
     [notice, setNotice] = useState('');
   const [docs, setDocs] = useState<AnyRecord[]>([]),
@@ -128,6 +130,7 @@ export default function Home() {
     setError('');
     setNotice('');
     setBusy(false);
+    setConfirmingId(null);
     setText('');
     setFrom('');
     setTo('');
@@ -155,7 +158,7 @@ export default function Home() {
   }, []);
   useEffect(() => {
     messagesEnd.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-  }, [messages, busy]);
+  }, [messages, busy, dashboard?.approvals]);
   async function openConversation(id: string) {
     const g = generation.current;
     activeConversation.current = id;
@@ -188,7 +191,7 @@ export default function Home() {
     }
   }
   async function send(value = text) {
-    if (!value.trim() || busy || !current) return;
+    if (!value.trim() || busy || confirmingId || !current) return;
     const g = generation.current;
     setBusy(true);
     setError('');
@@ -268,20 +271,90 @@ export default function Home() {
       if (g === generation.current) setBusy(false);
     }
   }
-  async function confirm(id: string) {
+  async function decideApproval(id: string, action: 'confirm' | 'cancel') {
+    if (busy || confirmingId) return;
     const g = generation.current;
+    const approval = dashboard?.approvals?.find((a: AnyRecord) => a.id === id);
+    setConfirmingId(id);
+    setApprovalAction(action);
+    setError('');
     try {
-      const result = await api(`approvals/${id}/confirm`, {});
+      const result = await api(`approvals/${id}/${action}`, {});
       if (g !== generation.current) return;
       setNotice(
         result.status === 'completed'
           ? 'Transfer confirmed and completed.'
-          : result.error || result.status,
+          : result.status === 'cancelled'
+            ? 'Transfer proposal cancelled. No money was moved.'
+            : result.error || result.status,
       );
+      if (approval?.conversationId) {
+        const c = await api(`conversations/${approval.conversationId}`);
+        if (g === generation.current && activeConversation.current === approval.conversationId)
+          setMessages(c.messages);
+      }
       await refresh(g);
     } catch (e) {
-      if (g === generation.current) setError((e as Error).message);
+      if (g === generation.current) {
+        const message =
+          action === 'cancel'
+            ? `We could not confirm cancellation. Reload the conversation to check the proposal. ${(e as Error).message}`
+            : `We could not retrieve the confirmation result. Check your activity before submitting another payment. ${(e as Error).message}`;
+        setError(message);
+        if (approval?.conversationId && activeConversation.current === approval.conversationId)
+          setMessages((m) => [
+            ...m,
+            {
+              id: `confirmation-error-${id}-${Date.now()}`,
+              role: 'assistant',
+              content: message,
+              created_at: new Date().toISOString(),
+            },
+          ]);
+      }
+    } finally {
+      if (g === generation.current) setConfirmingId(null);
     }
+  }
+  const chatApprovals: AnyRecord[] = (dashboard?.approvals || []).filter(
+    (a: AnyRecord) => conversationId && a.conversationId === conversationId,
+  );
+  function approvalCard(a: AnyRecord) {
+    const accountLabel = (id: string) => {
+      const account = [...(dashboard?.accounts || []), ...(dashboard?.contacts || [])].find(
+        (item: AnyRecord) => item.id === id,
+      );
+      return account ? `${account.name || current?.name} · ${account.label} (${id})` : id;
+    };
+    return (
+      <div className="transfer-proposal" key={a.id}>
+        <strong>Review your transfer</strong>
+        <p>
+          Amount: <b>{money(a.payload.amountCents)}</b>
+        </p>
+        <p>From: {accountLabel(a.payload.fromAccountId)}</p>
+        <p>To: {accountLabel(a.payload.toAccountId)}</p>
+        <p>Concept: {a.payload.concept}</p>
+        <div className="proposal-actions">
+          <button
+            className="primary-button"
+            disabled={busy || !!confirmingId}
+            onClick={() => decideApproval(a.id, 'confirm')}
+          >
+            {confirmingId === a.id && approvalAction === 'confirm'
+              ? 'Confirming…'
+              : 'Confirm these details'}
+          </button>
+          <button
+            className="secondary-button"
+            disabled={busy || !!confirmingId}
+            onClick={() => decideApproval(a.id, 'cancel')}
+          >
+            {confirmingId === a.id && approvalAction === 'cancel' ? 'Cancelling…' : 'Cancel'}
+          </button>
+        </div>
+      </div>
+    );
   }
   const operator = current?.role === 'operator';
   const nav = operator
@@ -567,24 +640,51 @@ export default function Home() {
                         </div>
                       )}
                       {messages.map((m, i) => (
-                        <div className={`message ${m.role}`} key={m.id || i}>
-                          {m.role === 'assistant' && <span className="message-avatar">✧</span>}
-                          <div className="bubble">
-                            <div>
-                              {String(m.content)
-                                .split(/(\*\*[^*]+\*\*)/g)
-                                .map((part, j) =>
-                                  part.startsWith('**') && part.endsWith('**') ? (
-                                    <strong key={j}>{part.slice(2, -2)}</strong>
-                                  ) : (
-                                    part
-                                  ),
-                                )}
+                        <Fragment key={m.id || i}>
+                          <div className={`message ${m.role}`}>
+                            {m.role === 'assistant' && <span className="message-avatar">✧</span>}
+                            <div className="bubble">
+                              <div>
+                                {String(m.content)
+                                  .split(/(\*\*[^*]+\*\*)/g)
+                                  .map((part, j) =>
+                                    part.startsWith('**') && part.endsWith('**') ? (
+                                      <strong key={j}>{part.slice(2, -2)}</strong>
+                                    ) : (
+                                      part
+                                    ),
+                                  )}
+                              </div>
+                              <small>{date(m.created_at)}</small>
                             </div>
-                            <small>{date(m.created_at)}</small>
                           </div>
-                        </div>
+                          {m.role === 'assistant' &&
+                            !messages
+                              .slice(i + 1)
+                              .some(
+                                (later) => later.role === 'assistant' && later.run_id === m.run_id,
+                              ) &&
+                            chatApprovals
+                              .filter((a) => a.runId === m.run_id)
+                              .map((a) => (
+                                <div className="message assistant" key={a.id}>
+                                  <span className="message-avatar">✧</span>
+                                  <div className="bubble">{approvalCard(a)}</div>
+                                </div>
+                              ))}
+                        </Fragment>
                       ))}
+                      {chatApprovals
+                        .filter(
+                          (a) =>
+                            !messages.some((m) => m.role === 'assistant' && m.run_id === a.runId),
+                        )
+                        .map((a) => (
+                          <div className="message assistant" key={a.id}>
+                            <span className="message-avatar">✧</span>
+                            <div className="bubble">{approvalCard(a)}</div>
+                          </div>
+                        ))}
                       {busy && (
                         <div className="message assistant">
                           <span className="message-avatar">✧</span>
@@ -618,7 +718,10 @@ export default function Home() {
                         }}
                         rows={2}
                       />
-                      <button aria-label="Send message" disabled={busy || !text.trim()}>
+                      <button
+                        aria-label="Send message"
+                        disabled={busy || !!confirmingId || !text.trim()}
+                      >
                         <Icon name="arrow" />
                       </button>
                     </form>
@@ -695,7 +798,7 @@ export default function Home() {
                         />
                       </label>
                       <button className="primary-button" disabled={busy}>
-                        {busy ? 'Processing…' : 'Send transfer'}
+                        {busy ? 'Preparing…' : 'Review transfer'}
                         <Icon name="arrow" />
                       </button>
                     </form>
@@ -717,21 +820,10 @@ export default function Home() {
                   </div>
                 </>
               )}
-              {dashboard.approvals?.length > 0 && (
+              {tab !== 'chat' && dashboard.approvals?.length > 0 && (
                 <section className="panel approvals">
                   <h2>Proposals awaiting confirmation</h2>
-                  {dashboard.approvals.map((a: AnyRecord) => (
-                    <div key={a.id}>
-                      <p>
-                        <strong>{money(a.payload.amountCents)}</strong> · {a.payload.fromAccountId}{' '}
-                        → {a.payload.toAccountId}
-                      </p>
-                      <p>{a.payload.concept}</p>
-                      <button className="primary-button" onClick={() => confirm(a.id)}>
-                        Confirm these details
-                      </button>
-                    </div>
-                  ))}
+                  {dashboard.approvals.map(approvalCard)}
                 </section>
               )}
               {tab === 'overview' && operator && (

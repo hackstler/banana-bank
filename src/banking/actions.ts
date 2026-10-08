@@ -29,11 +29,12 @@ export async function transferMoney(ctx: ToolContext, args: unknown): Promise<Ac
     input,
   });
   const previous = db
-    .prepare('SELECT user_id,payload,bank_reference FROM intents WHERE id=?')
+    .prepare('SELECT user_id,payload,bank_reference,status FROM intents WHERE id=?')
     .get(ctx.intentId) as
-    { user_id: string; payload: string; bank_reference: string | null } | undefined;
+    { user_id: string; payload: string; bank_reference: string | null; status: string } | undefined;
   if (previous && (previous.user_id !== ctx.userId || previous.payload !== JSON.stringify(input)))
     throw new HttpError(409, 'This intent belongs to a different payload.');
+  if (previous?.status === 'cancelled') throw new HttpError(409, 'This intent was cancelled.');
   const proposedReference = previous?.bank_reference || randomUUID();
   traceLog('transfer', previous ? 'intent.reused' : 'intent.created', {
     runId: ctx.runId,
@@ -78,7 +79,10 @@ export async function transferMoney(ctx: ToolContext, args: unknown): Promise<Ac
     permission: permission || 'authorized',
   });
   if (permission) return permission;
-  db.prepare('UPDATE intents SET status=? WHERE id=?').run('processing', ctx.intentId);
+  const processing = db
+    .prepare("UPDATE intents SET status=? WHERE id=? AND status!='cancelled'")
+    .run('processing', ctx.intentId);
+  if (!processing.changes) throw new HttpError(409, 'This intent was cancelled.');
   recordEvent(ctx, 'transfer.started', { status: 'processing', input, intentId: ctx.intentId });
   try {
     traceLog('transfer', 'dispatch.started', {

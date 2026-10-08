@@ -861,6 +861,20 @@ label select {
 .approvals {
   margin-top: 25px;
 }
+.transfer-proposal {
+  white-space: normal;
+}
+.transfer-proposal p {
+  margin: 8px 0;
+}
+.transfer-proposal button {
+  margin-top: 8px;
+}
+.proposal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
 .approvals > div {
   padding: 15px;
   border: 1px solid #d7e4cb;
