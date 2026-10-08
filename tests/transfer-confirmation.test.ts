@@ -22,8 +22,9 @@ process.env.BANK_URL = `http://127.0.0.1:${port}`;
 
 const { config } = await import('../src/config');
 const { appDb, closeAppDb } = await import('../src/db');
-const { sessionToken } = await import('../src/auth');
+const { sessionToken, HttpError } = await import('../src/auth');
 const { bankRequest, BankError } = await import('../src/banking/client');
+const { authorizeTransfer } = await import('../src/banking/authorization');
 const { POST, GET } = await import('../app/api/[...path]/route');
 const { runTool } = await import('../src/agent/tools');
 const input = {
@@ -255,6 +256,233 @@ test('normal: cancelling a proposal preserves balances and prevents later confir
   assert.equal((await api(`approvals/${consumed.id}/cancel`, {})).status, 409);
 });
 
+for (const concurrent of [false, true]) {
+  test(`normal: an approval is single-use (${concurrent ? 'concurrent' : 'sequential'} confirmations)`, async () => {
+    const intentId = `single-use-${concurrent ? 'concurrent' : 'sequential'}`;
+    const conversation = await api('conversations', {});
+    const before = await api('dashboard');
+    const destinationBefore = await bankRequest<any[]>('carla', '/v1/accounts');
+    const operationsBefore = await bankRequest<any>('marta', '/v1/operator/customer?id=ines');
+    const proposal = await api('actions', {
+      name: 'transfer_money',
+      arguments: input,
+      intentId,
+      conversationId: conversation.data.id,
+    });
+    const approvalId = proposal.data.approvalId;
+    assert.equal(proposal.data.status, 'requires_confirmation');
+    const originalFetch = globalThis.fetch;
+    const transferRequests: any[] = [];
+    const consumedAtDispatch: (string | null)[] = [];
+    // Observe real HTTP requests; do not replace the bank's responses or behavior.
+    globalThis.fetch = (async (resource, init) => {
+      if (new URL(String(resource)).pathname === '/v1/transfers' && init?.method === 'POST') {
+        transferRequests.push(JSON.parse(String(init.body)));
+        consumedAtDispatch.push(
+          (appDb().prepare('SELECT consumed_at FROM approvals WHERE id=?').get(approvalId) as any)
+            .consumed_at,
+        );
+      }
+      return originalFetch(resource, init);
+    }) as typeof fetch;
+    let responses;
+    try {
+      const confirm = () => api(`approvals/${approvalId}/confirm`, {});
+      responses = concurrent
+        ? await Promise.all([confirm(), confirm()])
+        : [await confirm(), await confirm()];
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+    const intent = appDb().prepare('SELECT * FROM intents WHERE id=?').get(intentId) as any;
+    const approval = appDb().prepare('SELECT * FROM approvals WHERE id=?').get(approvalId) as any;
+    const confirmedEvents = appDb()
+      .prepare("SELECT data FROM events WHERE kind='transfer.confirmed'")
+      .all()
+      .filter((event: any) => JSON.parse(event.data).intentId === intentId);
+    const after = await api('dashboard');
+    const destinationAfter = await bankRequest<any[]>('carla', '/v1/accounts');
+    const operation = await bankRequest<any>('ines', `/v1/operations/${intent.bank_reference}`);
+    const operationsAfter = await bankRequest<any>('marta', '/v1/operator/customer?id=ines');
+    const history = await api(`conversations/${conversation.data.id}`);
+    console.log(
+      'approval.evidence',
+      JSON.stringify({
+        profile: 'normal',
+        scenario: concurrent ? 'concurrent' : 'sequential',
+        intentId,
+        approvalId,
+        responses,
+        transferRequests,
+        confirmedEvents: confirmedEvents.length,
+        intentStatus: intent.status,
+        bankReference: intent.bank_reference,
+        operationId: operation.id,
+        consumedAt: approval.consumed_at,
+        consumedAtDispatch,
+        balanceBefore: before.data.accounts[0].balanceCents,
+        balanceAfter: after.data.accounts[0].balanceCents,
+        newOperations: operationsAfter.operations.length - operationsBefore.operations.length,
+        conversationMessages: history.data.messages.length,
+      }),
+    );
+    assert.equal(
+      after.data.accounts[0].balanceCents,
+      before.data.accounts[0].balanceCents - input.amountCents,
+    );
+    assert.equal(
+      destinationAfter[0].balanceCents,
+      destinationBefore[0].balanceCents + input.amountCents,
+    );
+    const newMovements = after.data.movements.filter(
+      (m: any) => !before.data.movements.some((old: any) => old.id === m.id),
+    );
+    assert.equal(newMovements.length, 1);
+    assert.equal(newMovements[0].amountCents, -input.amountCents);
+    assert.equal(newMovements[0].operationId, operation.id);
+    const credits = (await bankRequest<any[]>('carla', '/v1/movements')).filter(
+      (m) => m.operationId === operation.id,
+    );
+    assert.equal(credits.length, 1);
+    assert.equal(credits[0].amountCents, input.amountCents);
+    assert.equal(operationsAfter.operations.length, operationsBefore.operations.length + 1);
+    for (const key of Object.keys(input) as (keyof typeof input)[])
+      assert.equal(operation[key], input[key]);
+    assert.equal(operation.id, intent.operation_id);
+    assert.equal(intent.status, 'completed');
+    assert.ok(approval.consumed_at);
+    assert.deepEqual(responses.map((r) => r.status).sort(), [200, 409]);
+    assert.equal(responses.find((r) => r.status === 200)?.data.operation.id, operation.id);
+    assert.equal(transferRequests.length, 1);
+    assert.ok(consumedAtDispatch[0]);
+    assert.equal(transferRequests[0].reference, intent.bank_reference);
+    assert.equal(confirmedEvents.length, 1);
+    assert.equal(history.data.messages.length, 1);
+    assert.match(history.data.messages[0].content, /Transfer completed/);
+    assert.ok(history.data.messages[0].content.includes(intent.bank_reference));
+  });
+}
+
+test('normal: public API cannot change the reviewed operation when confirming', async () => {
+  const intentId = 'reviewed-api-payload';
+  const proposal = await api('actions', { name: 'transfer_money', arguments: input, intentId });
+  const before = await api('dashboard');
+  const changed = { ...input, amountCents: 2000, toAccountId: 'acc-bruno', concept: 'changed' };
+  const altered = await api('actions', { name: 'transfer_money', arguments: changed, intentId });
+  assert.equal(altered.data.status, 'failed');
+  assert.deepEqual((await api('dashboard')).data.accounts, before.data.accounts);
+  // The endpoint ignores browser-supplied transfer details and uses the stored proposal.
+  const result = await api(`approvals/${proposal.data.approvalId}/confirm`, changed);
+  assert.equal(result.data.status, 'completed');
+  for (const key of Object.keys(input) as (keyof typeof input)[])
+    assert.equal(result.data.operation[key], input[key]);
+  const intent = appDb()
+    .prepare('SELECT bank_reference FROM intents WHERE id=?')
+    .get(intentId) as any;
+  const operation = await bankRequest<any>('ines', `/v1/operations/${intent.bank_reference}`);
+  assert.equal(operation.id, result.data.operation.id);
+  for (const key of Object.keys(input) as (keyof typeof input)[])
+    assert.equal(operation[key], input[key]);
+});
+
+test('authorization: approval must match every reviewed field, holder and intent', async () => {
+  const intentId = 'reviewed-authorization-payload';
+  const proposal = await api('actions', { name: 'transfer_money', arguments: input, intentId });
+  const ctx = {
+    userId: 'ines',
+    conversationId: null,
+    runId: 'reviewed-authorization',
+    intentId,
+    approvalId: proposal.data.approvalId,
+  };
+  const before = await api('dashboard');
+  const invalidInputs = [
+    { ...input, fromAccountId: 'acc-ines-savings' },
+    { ...input, toAccountId: 'acc-bruno' },
+    { ...input, amountCents: 2000 },
+    { ...input, concept: 'changed' },
+  ];
+  // Focal internal-boundary test, not a claim that the public API permits payload changes.
+  const attempts = [];
+  for (const changed of invalidInputs) {
+    try {
+      attempts.push({ changed, result: await authorizeTransfer(ctx, changed) });
+    } catch (error) {
+      attempts.push({ changed, status: error instanceof HttpError ? error.status : null });
+    }
+  }
+  console.log('approval.payload.evidence', JSON.stringify({ intentId, attempts }));
+  assert.ok(attempts.every((attempt) => 'status' in attempt && attempt.status === 409));
+  const approval = appDb()
+    .prepare('SELECT consumed_at FROM approvals WHERE id=?')
+    .get(ctx.approvalId) as any;
+  assert.equal(approval.consumed_at, null);
+  const other = await api('actions', {
+    name: 'transfer_money',
+    arguments: input,
+    intentId: 'different-approval-intent',
+  });
+  await assert.rejects(
+    authorizeTransfer({ ...ctx, intentId: 'different-approval-intent' }, input),
+    (error: unknown) => error instanceof HttpError && error.status === 403,
+  );
+  await assert.rejects(
+    authorizeTransfer({ ...ctx, userId: 'bruno' }, { ...input, fromAccountId: 'acc-bruno' }),
+    (error: unknown) => error instanceof HttpError && error.status === 403,
+  );
+  assert.ok(other.data.approvalId);
+  const after = await api('dashboard');
+  assert.deepEqual(after.data.accounts, before.data.accounts);
+  assert.deepEqual(after.data.movements, before.data.movements);
+  const intent = appDb()
+    .prepare('SELECT bank_reference FROM intents WHERE id=?')
+    .get(intentId) as any;
+  await assert.rejects(
+    bankRequest('ines', `/v1/operations/${intent.bank_reference}`),
+    (error: unknown) => error instanceof BankError && error.status === 404,
+  );
+  assert.equal((await api(`approvals/${ctx.approvalId}/confirm`, {})).data.status, 'completed');
+});
+
+test('normal: bank rejection does not make a consumed approval reusable', async () => {
+  const intentId = 'rejected-consumed-approval';
+  const conversation = await api('conversations', {});
+  const before = await api('dashboard');
+  const operationsBefore = await bankRequest<any>('marta', '/v1/operator/customer?id=ines');
+  const proposal = await api('actions', {
+    name: 'transfer_money',
+    arguments: { ...input, amountCents: 10000000 },
+    intentId,
+    conversationId: conversation.data.id,
+  });
+  assert.equal(proposal.data.status, 'requires_confirmation');
+  const result = await api(`approvals/${proposal.data.approvalId}/confirm`, {});
+  assert.equal(result.data.status, 'failed');
+  assert.match(result.data.error, /Insufficient funds/);
+  const approval = appDb()
+    .prepare('SELECT consumed_at FROM approvals WHERE id=?')
+    .get(proposal.data.approvalId) as any;
+  assert.ok(approval.consumed_at);
+  assert.equal((await api(`approvals/${proposal.data.approvalId}/confirm`, {})).status, 409);
+  const intent = appDb().prepare('SELECT * FROM intents WHERE id=?').get(intentId) as any;
+  assert.equal(intent.status, 'failed');
+  assert.equal(intent.operation_id, null);
+  const after = await api('dashboard');
+  assert.deepEqual(after.data.accounts, before.data.accounts);
+  assert.deepEqual(after.data.movements, before.data.movements);
+  assert.deepEqual(
+    (await bankRequest<any>('marta', '/v1/operator/customer?id=ines')).operations,
+    operationsBefore.operations,
+  );
+  await assert.rejects(
+    bankRequest('ines', `/v1/operations/${intent.bank_reference}`),
+    (error: unknown) => error instanceof BankError && error.status === 404,
+  );
+  const history = await api(`conversations/${conversation.data.id}`);
+  assert.equal(history.data.messages.length, 1);
+  assert.match(history.data.messages[0].content, /Insufficient funds/);
+});
+
 test('read-unavailable: conversational feedback preserves the unverified result', async () => {
   const profile = await fetch(`${config.bankUrl}/admin/scenario`, {
     method: 'POST',
@@ -276,6 +504,15 @@ test('read-unavailable: conversational feedback preserves the unverified result'
   assert.match(history.data.messages[0].content, /pending verification/);
   assert.ok(history.data.messages[0].content.includes(result.data.bankReference));
   assert.doesNotMatch(history.data.messages[0].content, /Transfer completed|rejected/);
+  assert.deepEqual(
+    (await api(`conversations/${conversation.data.id}`)).data.messages,
+    history.data.messages,
+  );
+  assert.equal((await api(`approvals/${proposal.data.approvalId}/confirm`, {})).status, 409);
+  const intent = appDb()
+    .prepare('SELECT status FROM intents WHERE id=?')
+    .get('pending-feedback') as any;
+  assert.equal(intent.status, 'pending_verification');
   assert.deepEqual(
     (await api(`conversations/${conversation.data.id}`)).data.messages,
     history.data.messages,

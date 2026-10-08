@@ -17,15 +17,36 @@ export async function authorizeTransfer(
   };
   if (intent.status === 'cancelled') throw new HttpError(409, 'This intent was cancelled.');
   if (ctx.approvalId) {
-    const approval = db
-      .prepare('SELECT id FROM approvals WHERE id=? AND user_id=? AND intent_id=?')
-      .get(ctx.approvalId, ctx.userId, ctx.intentId);
-    if (!approval) throw new HttpError(403, 'Customer confirmation is required.');
-    recordEvent(ctx, 'transfer.confirmed', {
-      status: 'confirmed',
-      intentId: ctx.intentId,
-      approvalId: ctx.approvalId,
-    });
+    db.transaction(() => {
+      const approval = db
+        .prepare(
+          'SELECT payload,consumed_at FROM approvals WHERE id=? AND user_id=? AND intent_id=?',
+        )
+        .get(ctx.approvalId, ctx.userId, ctx.intentId) as
+        { payload: string; consumed_at: string | null } | undefined;
+      if (!approval) throw new HttpError(403, 'Customer confirmation is required.');
+      if (approval.consumed_at) throw new HttpError(409, 'This proposal was already confirmed.');
+      const reviewed = JSON.parse(approval.payload) as TransferInput;
+      if (
+        reviewed.fromAccountId !== input.fromAccountId ||
+        reviewed.toAccountId !== input.toAccountId ||
+        reviewed.amountCents !== input.amountCents ||
+        reviewed.concept !== input.concept
+      )
+        throw new HttpError(409, 'Confirmation does not match the reviewed operation.');
+      // Claim once before network effects; dispatch retries belong to this same execution.
+      const claimed = db
+        .prepare(
+          'UPDATE approvals SET consumed_at=? WHERE id=? AND user_id=? AND intent_id=? AND consumed_at IS NULL',
+        )
+        .run(new Date().toISOString(), ctx.approvalId, ctx.userId, ctx.intentId);
+      if (!claimed.changes) throw new HttpError(409, 'This proposal was already confirmed.');
+      recordEvent(ctx, 'transfer.confirmed', {
+        status: 'confirmed',
+        intentId: ctx.intentId,
+        approvalId: ctx.approvalId,
+      });
+    }).immediate();
     return null;
   }
   const previous = db

@@ -229,11 +229,6 @@ async function handler(request: Request, context: RouteContext) {
         },
         JSON.parse(approval.payload),
       );
-      if (result.status === 'completed' || result.status === 'pending_verification')
-        db.prepare('UPDATE approvals SET consumed_at=? WHERE id=?').run(
-          new Date().toISOString(),
-          approval.id,
-        );
       if (intent.conversation_id) {
         const operation = result.operation as Operation | undefined;
         const content =
