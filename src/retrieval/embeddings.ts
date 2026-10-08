@@ -2,6 +2,7 @@ import OpenAI from 'openai';
 import { createHash } from 'node:crypto';
 import { appDb } from '../db';
 import { config } from '../config';
+import { errorDetails, traceLog } from '../trace';
 export const dimensions = 1536;
 export function vectorBuffer(vector: number[]) {
   return Buffer.from(new Float32Array(vector).buffer);
@@ -28,7 +29,11 @@ export function openai() {
   if (!process.env.OPENAI_API_KEY?.trim()) throw new MissingOpenAIKeyError();
   return new OpenAI({ apiKey: process.env.OPENAI_API_KEY, maxRetries: 2, timeout: 45000 });
 }
-export async function embedTexts(texts: string[]): Promise<number[][]> {
+export async function embedTexts(
+  texts: string[],
+  trace: Record<string, unknown> = {},
+): Promise<number[][]> {
+  const started = Date.now();
   const db = appDb(),
     result: number[][] = new Array(texts.length),
     missing: { index: number; text: string; key: string }[] = [];
@@ -39,25 +44,62 @@ export async function embedTexts(texts: string[]): Promise<number[][]> {
     if (cached) result[index] = readVector(cached.vector);
     else missing.push({ index, text, key });
   });
+  traceLog('rag', 'embeddings.started', {
+    ...trace,
+    model: config.embeddingModel,
+    inputCount: texts.length,
+    cacheHits: texts.length - missing.length,
+    cacheMisses: missing.length,
+  });
   for (let offset = 0; offset < missing.length; offset += 48) {
     const batch = missing.slice(offset, offset + 48);
-    const response = await openai().embeddings.create({
-      model: config.embeddingModel,
-      input: batch.map((x) => x.text),
-      dimensions,
-      encoding_format: 'float',
+    const batchStarted = Date.now();
+    traceLog('rag', 'embeddings.batch.started', {
+      ...trace,
+      offset,
+      batchSize: batch.length,
     });
-    for (const item of response.data) {
-      const target = batch[item.index];
-      if (!target || item.embedding.length !== dimensions)
-        throw new Error('Unexpected dimensions returned by the embeddings API.');
-      result[target.index] = item.embedding;
-      db.prepare('INSERT OR REPLACE INTO embedding_cache VALUES(?,?)').run(
-        target.key,
-        vectorBuffer(item.embedding),
-      );
+    try {
+      const response = await openai().embeddings.create({
+        model: config.embeddingModel,
+        input: batch.map((x) => x.text),
+        dimensions,
+        encoding_format: 'float',
+      });
+      for (const item of response.data) {
+        const target = batch[item.index];
+        if (!target || item.embedding.length !== dimensions)
+          throw new Error('Unexpected dimensions returned by the embeddings API.');
+        result[target.index] = item.embedding;
+        db.prepare('INSERT OR REPLACE INTO embedding_cache VALUES(?,?)').run(
+          target.key,
+          vectorBuffer(item.embedding),
+        );
+      }
+      traceLog('rag', 'embeddings.batch.completed', {
+        ...trace,
+        offset,
+        batchSize: batch.length,
+        dimensions,
+        durationMs: Date.now() - batchStarted,
+      });
+    } catch (error) {
+      traceLog('rag', 'embeddings.batch.failed', {
+        ...trace,
+        offset,
+        batchSize: batch.length,
+        durationMs: Date.now() - batchStarted,
+        error: errorDetails(error),
+      });
+      throw error;
     }
     if (batch.some((x) => !result[x.index])) throw new Error('Incomplete embeddings response.');
   }
+  traceLog('rag', 'embeddings.completed', {
+    ...trace,
+    inputCount: texts.length,
+    dimensions,
+    durationMs: Date.now() - started,
+  });
   return result;
 }

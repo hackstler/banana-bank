@@ -14,5 +14,6 @@ export const config = {
   chatModel: process.env.OPENAI_CHAT_MODEL || 'gpt-6-luna',
   embeddingModel: process.env.OPENAI_EMBEDDING_MODEL || 'text-embedding-3-small',
   bankTimeoutMs: Number(process.env.BANK_TIMEOUT_MS || 1400),
+  traceLogs: process.env.TRACE_LOGS !== '0',
 };
 export const referenceDate = '2026-09-24';

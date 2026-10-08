@@ -30,6 +30,7 @@ export type ToolContext = {
   conversationId: string | null;
   runId: string;
   intentId: string;
+  callId?: string;
   approvalId?: string;
 };
 export type ActionResult = { status: string; [key: string]: unknown };

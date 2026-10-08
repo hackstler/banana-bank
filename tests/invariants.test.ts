@@ -15,6 +15,7 @@ const { appDb, closeAppDb } = await import('../src/db');
 const { actor, sessionToken, sameOrigin } = await import('../src/auth');
 const { documents, readDocument } = await import('../src/ingestion/pipeline');
 const { allChunks } = await import('../src/retrieval/store');
+const { transferMoney } = await import('../src/banking/actions');
 const input = {
   fromAccountId: 'acc-lucia',
   toAccountId: 'acc-bruno',
@@ -26,6 +27,16 @@ function snapshot() {
     accounts: bankDb().prepare('SELECT * FROM accounts ORDER BY id').all(),
     movements: bankDb().prepare('SELECT * FROM movements ORDER BY id').all(),
     operations: bankDb().prepare('SELECT * FROM operations ORDER BY id').all(),
+  };
+}
+const jsonResponse = (data: unknown, status = 200) =>
+  Response.json(data, { status, headers: { 'Content-Type': 'application/json' } });
+function transferContext(intentId: string) {
+  return {
+    userId: 'lucia',
+    conversationId: null,
+    runId: `run-${intentId}`,
+    intentId,
   };
 }
 test('reset reproduces consistent accounts and transactions', () => {
@@ -121,6 +132,95 @@ test('intermittent scenarios repeat with the same seed', () => {
   };
   assert.deepEqual(run(), run());
   assert.ok(run().includes('lost-response'));
+});
+test('application retries reuse the persisted bank reference', async () => {
+  seedApp();
+  const originalFetch = globalThis.fetch,
+    references: string[] = [];
+  let postCount = 0;
+  globalThis.fetch = (async (resource: string | URL | Request, init?: RequestInit) => {
+    const url = new URL(String(resource));
+    if (url.pathname === '/v1/accounts')
+      return jsonResponse([{ id: input.fromAccountId, userId: 'lucia' }]);
+    if (url.pathname === '/v1/transfers') {
+      const body = JSON.parse(String(init?.body));
+      references.push(body.reference);
+      postCount += 1;
+      if (postCount === 1) return jsonResponse({ error: 'Service unavailable' }, 503);
+      return jsonResponse({ ...body, id: 'operation-retry', userId: 'lucia', status: 'completed' });
+    }
+    if (url.pathname.startsWith('/v1/operations/'))
+      return jsonResponse({ error: 'Operation not found' }, 404);
+    throw new Error(`Unexpected bank request: ${url.pathname}`);
+  }) as typeof fetch;
+  try {
+    const result = await transferMoney(transferContext('intent-stable-reference'), input);
+    assert.equal(result.status, 'completed');
+    assert.equal(postCount, 2);
+    assert.equal(references[0], references[1]);
+    const intent = appDb()
+      .prepare('SELECT bank_reference FROM intents WHERE id=?')
+      .get('intent-stable-reference') as { bank_reference: string };
+    assert.equal(intent.bank_reference, references[0]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+test('application verifies a committed operation after an ambiguous response', async () => {
+  seedApp();
+  const originalFetch = globalThis.fetch;
+  let postCount = 0,
+    committed: any;
+  globalThis.fetch = (async (resource: string | URL | Request, init?: RequestInit) => {
+    const url = new URL(String(resource));
+    if (url.pathname === '/v1/accounts')
+      return jsonResponse([{ id: input.fromAccountId, userId: 'lucia' }]);
+    if (url.pathname === '/v1/transfers') {
+      const body = JSON.parse(String(init?.body));
+      postCount += 1;
+      committed = { ...body, id: 'operation-lost-response', userId: 'lucia', status: 'completed' };
+      return jsonResponse({ error: 'Upstream request timed out' }, 504);
+    }
+    if (url.pathname.startsWith('/v1/operations/')) return jsonResponse(committed);
+    throw new Error(`Unexpected bank request: ${url.pathname}`);
+  }) as typeof fetch;
+  try {
+    const result = await transferMoney(transferContext('intent-verified'), input);
+    assert.equal(result.status, 'completed');
+    assert.equal((result.operation as any).id, 'operation-lost-response');
+    assert.equal(postCount, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+test('application keeps an unverifiable transfer pending', async () => {
+  seedApp();
+  const originalFetch = globalThis.fetch;
+  let postCount = 0;
+  globalThis.fetch = (async (resource: string | URL | Request) => {
+    const url = new URL(String(resource));
+    if (url.pathname === '/v1/accounts')
+      return jsonResponse([{ id: input.fromAccountId, userId: 'lucia' }]);
+    if (url.pathname === '/v1/transfers') {
+      postCount += 1;
+      return jsonResponse({ error: 'Upstream request timed out' }, 504);
+    }
+    if (url.pathname.startsWith('/v1/operations/'))
+      return jsonResponse({ error: 'Query temporarily unavailable' }, 503);
+    throw new Error(`Unexpected bank request: ${url.pathname}`);
+  }) as typeof fetch;
+  try {
+    const result = await transferMoney(transferContext('intent-pending-verification'), input);
+    assert.equal(result.status, 'pending_verification');
+    assert.equal(postCount, 1);
+    const intent = appDb()
+      .prepare('SELECT status,bank_reference FROM intents WHERE id=?')
+      .get('intent-pending-verification') as { status: string; bank_reference: string };
+    assert.equal(intent.status, 'pending_verification');
+    assert.equal(result.bankReference, intent.bank_reference);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 test('the application seed preserves reproducible histories and index', () => {
   const first = seedApp();

@@ -13,6 +13,7 @@ import { searchDocuments } from '../../../src/retrieval/search';
 import { MissingOpenAIKeyError } from '../../../src/retrieval/embeddings';
 import { config } from '../../../src/config';
 import { allChunks } from '../../../src/retrieval/store';
+import { errorDetails, traceLog } from '../../../src/trace';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 const json = (data: unknown, status = 200, headers: Record<string, string> = {}) =>
@@ -125,12 +126,44 @@ async function handler(request: Request, context: RouteContext) {
       if (current.role !== 'customer') throw new HttpError(403, 'A customer is required.');
       if (body.conversationId) conversationFor(body.conversationId, current.id);
       const ctx = {
-        userId: current.id,
-        conversationId: body.conversationId || null,
-        runId: randomUUID(),
-        intentId: body.intentId || randomUUID(),
-      };
-      return json(await runTool(body.name, body.arguments, ctx));
+          userId: current.id,
+          conversationId: body.conversationId || null,
+          runId: randomUUID(),
+          intentId: body.intentId || randomUUID(),
+        },
+        actionStarted = Date.now();
+      traceLog('action', 'run.started', {
+        runId: ctx.runId,
+        intentId: ctx.intentId,
+        userId: ctx.userId,
+        conversationId: ctx.conversationId,
+        action: body.name,
+        arguments: body.arguments,
+      });
+      try {
+        const result = await runTool(body.name, body.arguments, ctx);
+        traceLog('action', 'run.completed', {
+          runId: ctx.runId,
+          intentId: ctx.intentId,
+          userId: ctx.userId,
+          conversationId: ctx.conversationId,
+          action: body.name,
+          result,
+          durationMs: Date.now() - actionStarted,
+        });
+        return json(result);
+      } catch (error) {
+        traceLog('action', 'run.failed', {
+          runId: ctx.runId,
+          intentId: ctx.intentId,
+          userId: ctx.userId,
+          conversationId: ctx.conversationId,
+          action: body.name,
+          error: errorDetails(error),
+          durationMs: Date.now() - actionStarted,
+        });
+        throw error;
+      }
     }
     if (path[0] === 'approvals' && path[1] && path[2] === 'confirm' && request.method === 'POST') {
       const approval = db
@@ -208,11 +241,19 @@ async function handler(request: Request, context: RouteContext) {
       const { query } = z
         .object({ query: z.string().min(1).max(2000) })
         .parse(await request.json());
-      return json({ sources: await searchDocuments(query, current.role) });
+      const searchId = randomUUID();
+      return json({
+        searchId,
+        sources: await searchDocuments(query, current.role, 5, {
+          runId: searchId,
+          userId: current.id,
+          origin: 'api.search',
+        }),
+      });
     }
     if (route === 'ingestion' && request.method === 'POST') {
       if (current.role !== 'operator') throw new HttpError(403, 'Operator role required.');
-      return json(await ingest());
+      return json(await ingest(() => {}, { userId: current.id, origin: 'api.ingestion' }));
     }
     throw new HttpError(404, 'Route not found.');
   } catch (e) {

@@ -72,6 +72,14 @@ export async function runTool(name: string, args: unknown, ctx: ToolContext): Pr
         result = {
           sources: await searchDocuments(
             z.object({ query: z.string().max(2000) }).parse(args).query,
+            'customer',
+            5,
+            {
+              runId: ctx.runId,
+              userId: ctx.userId,
+              conversationId: ctx.conversationId || undefined,
+              origin: 'tool.search_documents',
+            },
           ),
         };
         break;
