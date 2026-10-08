@@ -22,3 +22,7 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
   5. Explain relevant risks, side effects, and impact on the current task.
 - Do not implement the proposal until the user has explicitly approved it.
 - If it is unclear whether a change is required or additional, treat it as additional and ask first.
+
+## Work cycle
+
+Follow this cycle: rule → reproduction → evidence → alternatives → decision → implementation → repeat the same scenario → checks → update HowToDemo → review with the user → commit. The commit is the final step; do not add extra functionality without approval.

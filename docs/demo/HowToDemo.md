@@ -7,7 +7,8 @@ Chuleta: primero enseñar el fallo en la versión anterior y repetir la petició
 | 1. Transferencia duplicada por retry     | `684d232` | `cbbd64a` o posterior                               |
 | 2. Transferencia sin confirmación        | `cbbd64a` | `53e6e5f` o posterior                               |
 | 3. Aprobación reutilizable               | `53e6e5f` | `2f40bb6`                                           |
-| 4. Intent resuelto que se vuelve a abrir | `af402e0` | Este commit: `fix: reuse resolved transfer intents` |
+| 4. Intent resuelto que se vuelve a abrir | `af402e0` | `14534be` |
+| 5. Fallo al leer la respuesta bancaria | `14534be` | Corrección de lectura de respuesta descrita abajo |
 
 Para comparar con los **mismos intentId**, usar datos de demo nuevos en cada versión. Conservar una referencia ya ejecutada hace que el banco devuelva un replay y no active el fallo. En el caso 4, primero resolver el intent y luego repetirlo **sin limpiar los datos**, porque esa repetición es precisamente lo que comprobamos. Cambiar de profile reinicia el contador, **no** los saldos. No ejecutar `reset` sobre datos que quieras conservar.
 
@@ -372,6 +373,52 @@ TRACE_LOGS=0 node --import tsx --test \
 
 Las pruebas también comprueban que otro usuario o un payload distinto no recuperan el resultado, y que **dos intentId distintos con el mismo payload siguen siendo dos pagos legítimos**.
 
+## Validación pendiente de la tarea 3: slow-response e intermittent 17
+
+Regla: un timeout no demuestra rechazo; consultar la referencia persistida antes de reenviar. Estos escenarios ya estaban implementados en `cbbd64a`; aquí se cierra su cobertura de integración sin modificar el simulador.
+
+```sh
+TRACE_LOGS=0 node --import tsx --test \
+  --test-name-pattern='real HTTP reconciles' \
+  tests/transfer-confirmation.test.ts
+```
+
+Las pruebas arrancan el banco HTTP en un puerto local y con datos temporales propios. Configuran cada profile y su seed por HTTP, llaman a los handlers reales para proponer y confirmar, observan las peticiones sin sustituir las respuestas y verifican el snapshot bancario por la API administrativa de pruebas. No requieren navegador ni LLM y no alteran el banco habitual.
+
+| Profile | Secuencia observada | Resultado y efectos |
+| --- | --- | --- |
+| `slow-response` | Un POST; timeout real del cliente; GET por la misma referencia → `200`. | `completed`; una operación, un débito de 1000 y un crédito de 1000. |
+| `intermittent 17` | Tres intents nuevos: POST `200`, POST `200`, POST `504`; GET por la referencia del tercero → `200`. | Tres `completed`; tres operaciones y seis movimientos. Sin segundo POST del tercer intent. |
+
+La prueba de `slow-response` necesita `BANK_TIMEOUT_MS` menor que los 2600 ms del profile; con el valor por defecto de 1400 ms provoca `TimeoutError`. Ambas pruebas verifican los IDs y referencias persistidos, los saldos de todas las cuentas y los dos movimientos de cada operación. Los logs `reconciliation.evidence` muestran la secuencia HTTP y el número de efectos. Resultado focalizado: **2/2**; no fue necesario cambiar la implementación de reconciliación.
+
+## 5. Fallo al leer la respuesta bancaria — tarea 4
+
+Regla: recibir los headers no garantiza poder leer la respuesta ni permite concluir que el banco rechazó el pago.
+
+**Reproducción:** el mock registra una operación completada antes de devolver una respuesta HTTP `200` cuyo body falla. Se prueban un stream interrumpido y JSON incompleto; para ambos, la consulta posterior puede encontrar la operación o responder `503`. Es una ejecución simulada por el mock, no evidencia de un pago HTTP real. Ningún profile existente provoca directamente este fallo.
+
+**Antes:** `response.json()` estaba fuera del `try/catch` de transporte. Los cuatro escenarios devolvían y persistían `failed`, con un POST y **cero consultas por referencia**, aunque el mock ya había registrado la operación completada. Los cuatro tests fallaron antes de aplicar la corrección.
+
+**Alternativas y decisión:** ampliar el `try/catch` de `fetch` o capturar por separado el fallo de lectura. Se eligió un `catch` acotado a `response.json()` para registrar `response.read_failed` y convertir el error en `BankError(504)`. El dispatch existente consulta la referencia y determina el estado. Las respuestas bancarias legibles conservan su tratamiento por código HTTP.
+
+```sh
+TRACE_LOGS=0 node --import tsx --test \
+  --test-name-pattern='bank response read failure' \
+  tests/invariants.test.ts
+```
+
+| Lectura del POST | Consulta por referencia | Antes | Después |
+| --- | --- | --- | --- |
+| Stream interrumpido | Operación encontrada | `failed`, sin consulta | `completed`, misma operación |
+| Stream interrumpido | `503` | `failed`, sin consulta | `pending_verification`, misma referencia |
+| JSON incompleto | Operación encontrada | `failed`, sin consulta | `completed`, misma operación |
+| JSON incompleto | `503` | `failed`, sin consulta | `pending_verification`, misma referencia |
+
+**Después:** los mismos cuatro escenarios pasan, con un POST y una consulta cada uno, sin reenviar. Se verifican el estado persistido, el resultado recuperado o la referencia pendiente, la aprobación consumida y los eventos: no aparece `transfer.failed`. Los logs `body-read.evidence` permiten comparar los estados y contadores antes/después. Resultado focalizado: **4/4**.
+
+La corrección se limita a `src/banking/client.ts`. No añade recuperación automática tras reinicio, nuevos profiles, cambios de esquema ni reconciliación al repetir un intent pendiente.
+
 ## Evidencia adicional y checks
 
 Ensayo corregido: conversación `a4248cb8-3df1-4e68-bcda-41af34cec2fb`, aprobación `6aa91b10-a541-4b55-ab47-0c011b72e0dd`, operación `d2b25896-1b40-4b1d-8dcd-c82044cc0e80`, referencia `761dd2b6-56aa-46e1-931f-8a35e0976ea2`. Son UUID de datos temporales, no reutilizables tras borrarlos.
@@ -401,4 +448,8 @@ npm run typecheck
 npm run build
 ```
 
-Resultado validado tras la tarea 3: **15/15 focalizadas**, **31/31 totales**, tipos y build correctos. Antes de la corrección fallaron los cuatro escenarios de reutilización/estado en curso; después pasan. Los tests también cubren `read-unavailable`, titular/intent incorrectos, saldo insuficiente, cancelación y ausencia de efectos antes de confirmar. Para cerrar la demo, `npm run scenario -- normal`; esto no deshace pagos.
+Resultado anterior, tras la reutilización de intents (tarea 5 del plan): **15/15 focalizadas**, **31/31 totales**, tipos y build correctos. Antes de esa corrección fallaron los cuatro escenarios de reutilización/estado en curso; después pasan. Los tests también cubren `read-unavailable`, titular/intent incorrectos, saldo insuficiente, cancelación y ausencia de efectos antes de confirmar.
+
+Validación de cierre de Parte 1, tras las tareas 3 y 4: **37/37 tests** (20 invariantes y mocks, 17 de integración), `npm run typecheck`, `npm run build` y `git diff --check` correctos. Las seis pruebas nuevas son los dos profiles HTTP pendientes y los cuatro escenarios de lectura del body. La revisión con el usuario precede al commit final, según `AGENTS.md`.
+
+Para cerrar una demo manual, `npm run scenario -- normal`; esto no deshace pagos. Los tests utilizan y eliminan sus propios datos temporales y no cambian el profile del banco habitual.

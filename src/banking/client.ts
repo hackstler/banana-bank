@@ -53,7 +53,21 @@ export async function bankRequest<T>(
     });
     throw new BankError(504, 'No response received from the bank.');
   }
-  const data = await response.json();
+  let data;
+  try {
+    data = await response.json();
+  } catch (error) {
+    traceLog('bank', 'response.read_failed', {
+      bankRequestId,
+      userId,
+      method,
+      path,
+      status: response.status,
+      durationMs: Date.now() - started,
+      error: errorDetails(error),
+    });
+    throw new BankError(504, 'The bank response could not be read.');
+  }
   traceLog('bank', 'response.received', {
     bankRequestId,
     userId,

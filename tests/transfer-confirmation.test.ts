@@ -856,6 +856,134 @@ test('read-unavailable: conversational feedback preserves the unverified result'
   }
 });
 
+for (const profile of ['slow-response', 'intermittent'] as const) {
+  test(`${profile}${profile === 'intermittent' ? ' 17' : ''}: real HTTP reconciles without duplicate effects`, async () => {
+    const selected = await fetch(`${config.bankUrl}/admin/scenario`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${config.adminSecret}`,
+      },
+      body: JSON.stringify({ profile, seed: 17 }),
+    });
+    assert.equal(selected.status, 200);
+    assert.ok(config.bankTimeoutMs < 2600, 'The client must time out before the slow response.');
+    const snapshot = async () => {
+      const response = await fetch(`${config.bankUrl}/admin/snapshot`, {
+        headers: { Authorization: `Bearer ${config.adminSecret}` },
+      });
+      assert.equal(response.status, 200);
+      return response.json();
+    };
+    const before = await snapshot();
+    const count = profile === 'intermittent' ? 3 : 1;
+    const results: any[] = [];
+    const originalFetch = globalThis.fetch;
+    const requests: {
+      method: string;
+      path: string;
+      reference?: string;
+      outcome?: number | string;
+    }[] = [];
+    // Pass through to the real bank, observing both HTTP errors and the actual timeout.
+    globalThis.fetch = (async (resource, init) => {
+      const pathname = new URL(String(resource)).pathname;
+      if (pathname !== '/v1/transfers' && !pathname.startsWith('/v1/operations/'))
+        return originalFetch(resource, init);
+      const request = {
+        method: init?.method || 'GET',
+        path: pathname,
+        reference: init?.body ? JSON.parse(String(init.body)).reference : undefined,
+        outcome: undefined as number | string | undefined,
+      };
+      requests.push(request);
+      try {
+        const response = await originalFetch(resource, init);
+        request.outcome = response.status;
+        return response;
+      } catch (error) {
+        request.outcome = error instanceof Error ? error.name : String(error);
+        throw error;
+      }
+    }) as typeof fetch;
+    try {
+      for (let index = 0; index < count; index++) {
+        const intentId = `reconciliation-${profile}-${index}`;
+        const proposal = await api('actions', {
+          name: 'transfer_money',
+          arguments: input,
+          intentId,
+        });
+        assert.equal(proposal.data.status, 'requires_confirmation');
+        const confirmed = await api(`approvals/${proposal.data.approvalId}/confirm`, {});
+        assert.equal(confirmed.status, 200);
+        assert.equal(confirmed.data.status, 'completed');
+        const intent = appDb().prepare('SELECT * FROM intents WHERE id=?').get(intentId) as any;
+        assert.equal(intent.status, 'completed');
+        assert.equal(intent.operation_id, confirmed.data.operation.id);
+        assert.equal(intent.bank_reference, confirmed.data.operation.reference);
+        results.push(confirmed.data.operation);
+      }
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+    const after = await snapshot();
+    const newOperations = after.operations.filter(
+      (operation: any) => !before.operations.some((old: any) => old.id === operation.id),
+    );
+    assert.equal(newOperations.length, count);
+    assert.equal(after.movements.length - before.movements.length, 2 * count);
+    for (const operation of results) {
+      assert.deepEqual(
+        newOperations.find((stored: any) => stored.id === operation.id),
+        Object.fromEntries(Object.entries(operation).filter(([key]) => key !== 'replay')),
+      );
+      const movements = after.movements.filter(
+        (movement: any) => movement.operationId === operation.id,
+      );
+      assert.equal(movements.length, 2);
+      assert.equal(
+        movements.find((movement: any) => movement.accountId === input.fromAccountId).amountCents,
+        -input.amountCents,
+      );
+      assert.equal(
+        movements.find((movement: any) => movement.accountId === input.toAccountId).amountCents,
+        input.amountCents,
+      );
+    }
+    for (const account of after.accounts) {
+      const delta =
+        account.id === input.fromAccountId
+          ? -count * input.amountCents
+          : account.id === input.toAccountId
+            ? count * input.amountCents
+            : 0;
+      assert.equal(
+        account.balanceCents,
+        before.accounts.find((old: any) => old.id === account.id).balanceCents + delta,
+      );
+    }
+    assert.equal(after.scenario.counter, count);
+    assert.equal(requests.filter((request) => request.method === 'POST').length, count);
+    const ambiguous = requests[count - 1];
+    assert.equal(ambiguous.outcome, profile === 'intermittent' ? 504 : 'TimeoutError');
+    assert.equal(requests.length, count + 1);
+    assert.equal(requests[count].path, `/v1/operations/${ambiguous.reference}`);
+    assert.equal(requests[count].outcome, 200);
+    console.log(
+      'reconciliation.evidence',
+      JSON.stringify({
+        profile,
+        seed: 17,
+        requests,
+        newOperations: newOperations.length,
+        newMovements: after.movements.length - before.movements.length,
+        statuses: results.map((operation) => operation.status),
+      }),
+    );
+  });
+}
+
 after(async () => {
   if (bank && bank.exitCode === null && bank.signalCode === null) {
     const stopped = once(bank, 'exit');

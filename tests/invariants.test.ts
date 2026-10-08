@@ -228,6 +228,95 @@ test('application keeps an unverifiable transfer pending', async () => {
     globalThis.fetch = originalFetch;
   }
 });
+for (const failure of ['interrupted stream', 'invalid JSON'] as const) {
+  for (const lookupAvailable of [true, false]) {
+    test(`bank response read failure (${failure}): ${lookupAvailable ? 'reconciles the committed operation' : 'keeps the committed operation pending'}`, async () => {
+      seedApp();
+      const intentId = `body-read-${failure}-${lookupAvailable}`;
+      const originalFetch = globalThis.fetch;
+      let postCount = 0,
+        lookupCount = 0;
+      let committed: any;
+      globalThis.fetch = (async (resource, init) => {
+        const url = new URL(String(resource));
+        if (url.pathname === '/v1/accounts')
+          return jsonResponse([{ id: input.fromAccountId, userId: 'lucia' }]);
+        if (url.pathname === '/v1/transfers') {
+          const body = JSON.parse(String(init?.body));
+          postCount += 1;
+          // The mock records a completed bank operation before returning an unreadable body.
+          committed = {
+            ...body,
+            id: `operation-${intentId}`,
+            userId: 'lucia',
+            status: 'completed',
+          };
+          if (failure === 'invalid JSON') return new Response('{"id":', { status: 200 });
+          return new Response(
+            new ReadableStream({
+              start(controller) {
+                controller.error(new TypeError('Bank response stream interrupted.'));
+              },
+            }),
+            { status: 200 },
+          );
+        }
+        if (url.pathname.startsWith('/v1/operations/')) {
+          lookupCount += 1;
+          assert.equal(
+            decodeURIComponent(url.pathname.slice('/v1/operations/'.length)),
+            committed.reference,
+          );
+          return lookupAvailable
+            ? jsonResponse(committed)
+            : jsonResponse({ error: 'Query temporarily unavailable' }, 503);
+        }
+        throw new Error(`Unexpected bank request: ${url.pathname}`);
+      }) as typeof fetch;
+      try {
+        const result = await confirmedTransfer(intentId);
+        const intent = appDb().prepare('SELECT * FROM intents WHERE id=?').get(intentId) as any;
+        console.log(
+          'body-read.evidence',
+          JSON.stringify({
+            failure,
+            lookupAvailable,
+            mockOperationStatus: committed.status,
+            resultStatus: result.status,
+            persistedStatus: intent.status,
+            postCount,
+            lookupCount,
+          }),
+        );
+        const expectedStatus = lookupAvailable ? 'completed' : 'pending_verification';
+        assert.equal(result.status, expectedStatus);
+        assert.equal(intent.status, expectedStatus);
+        assert.equal(postCount, 1);
+        assert.equal(lookupCount, 1);
+        assert.equal(intent.bank_reference, committed.reference);
+        const approval = appDb()
+          .prepare('SELECT consumed_at FROM approvals WHERE intent_id=?')
+          .get(intentId) as any;
+        assert.ok(approval.consumed_at);
+        if (lookupAvailable) {
+          assert.deepEqual(result.operation, committed);
+          assert.equal(intent.operation_id, committed.id);
+        } else {
+          assert.equal(result.bankReference, committed.reference);
+          assert.equal(intent.operation_id, null);
+        }
+        const events = appDb()
+          .prepare('SELECT kind,data FROM events WHERE run_id=?')
+          .all(`run-${intentId}`) as any[];
+        assert.ok(events.some((event) => event.kind === `transfer.${expectedStatus}`));
+        assert.ok(!events.some((event) => event.kind === 'transfer.failed'));
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+  }
+}
+
 test('the application seed preserves reproducible histories and index', () => {
   const first = seedApp();
   assert.equal(first.indexLoaded, true);
