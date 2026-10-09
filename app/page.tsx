@@ -92,6 +92,7 @@ export default function Home() {
     [messages, setMessages] = useState<AnyRecord[]>([]);
   const [text, setText] = useState(''),
     [busy, setBusy] = useState(false),
+    [pendingChat, setPendingChat] = useState<{ conversationId: string | null } | null>(null),
     [confirmingId, setConfirmingId] = useState<string | null>(null),
     [approvalAction, setApprovalAction] = useState<'confirm' | 'cancel'>('confirm'),
     [error, setError] = useState(''),
@@ -130,6 +131,7 @@ export default function Home() {
     setError('');
     setNotice('');
     setBusy(false);
+    setPendingChat(null);
     setConfirmingId(null);
     setText('');
     setFrom('');
@@ -170,7 +172,8 @@ export default function Home() {
       const c = await api(`conversations/${id}`);
       if (g === generation.current && activeConversation.current === id) setMessages(c.messages);
     } catch (e) {
-      if (g === generation.current) setError((e as Error).message);
+      if (g === generation.current && activeConversation.current === id)
+        setError((e as Error).message);
     }
   }
   async function newConversation() {
@@ -191,9 +194,10 @@ export default function Home() {
     }
   }
   async function send(value = text) {
-    if (!value.trim() || busy || confirmingId || !current) return;
+    if (!value.trim() || busy || pendingChat || confirmingId || !current) return;
     const g = generation.current;
     setBusy(true);
+    setPendingChat({ conversationId });
     setError('');
     setText('');
     let id = conversationId;
@@ -202,17 +206,28 @@ export default function Home() {
         const c = await api('conversations', {});
         if (g !== generation.current) return;
         id = c.id;
-        activeConversation.current = id;
-        setConversationId(id);
+        if (activeConversation.current === null) {
+          activeConversation.current = id;
+          setConversationId(id);
+        }
       }
-      setTab('chat');
-      setMessages((m) => [
-        ...m,
-        { id: 'pending-user', role: 'user', content: value, created_at: new Date().toISOString() },
-      ]);
+      setPendingChat({ conversationId: id });
+      if (activeConversation.current === id) {
+        setTab('chat');
+        setMessages((m) => [
+          ...m,
+          {
+            id: 'pending-user',
+            role: 'user',
+            content: value,
+            created_at: new Date().toISOString(),
+          },
+        ]);
+      }
       await api(`conversations/${id}/messages`, { content: value });
     } catch (e) {
-      if (g === generation.current) setError((e as Error).message);
+      if (g === generation.current && activeConversation.current === id)
+        setError((e as Error).message);
     } finally {
       if (g === generation.current) {
         try {
@@ -225,7 +240,10 @@ export default function Home() {
           if (g === generation.current) setConversations(cs);
           await refresh(g);
         } catch {}
-        if (g === generation.current) setBusy(false);
+        if (g === generation.current) {
+          setBusy(false);
+          setPendingChat(null);
+        }
       }
     }
   }
@@ -685,7 +703,7 @@ export default function Home() {
                             <div className="bubble">{approvalCard(a)}</div>
                           </div>
                         ))}
-                      {busy && (
+                      {pendingChat && pendingChat.conversationId === conversationId && (
                         <div className="message assistant">
                           <span className="message-avatar">✧</span>
                           <div className="thinking">

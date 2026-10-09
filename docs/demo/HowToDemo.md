@@ -474,3 +474,18 @@ git diff --check
 ```
 
 Las pruebas live usan sesiones HTTP propias de Marta y Lucía, consumen llamadas reales del agente y dejan conversaciones de comprobación en la aplicación habitual. Cualquier propuesta creada se cancela; no se confirman pagos. Sin `BANANA_LIVE_TEST_URL`, estas cinco pruebas se omiten. Resultado: **5/5 live**, comprobación adicional de aclaración seguida de propuesta correcta, **20/20 invariantes**, typecheck y diff correctos. Las respuestas del modelo pueden variar: se comprueba su comportamiento, no una frase literal.
+
+## USABILITY-03 · Checking… en su conversación
+
+**Antes (`2b50a2a`):** reproducción aportada por el usuario y su captura: enviar «hola» en A y abrir B antes de recibir respuesta. B, aunque no tenga mensajes, muestra `Checking…` hasta que termina la petición de A. El render dependía de `busy`, compartido también con búsqueda y preparación de transferencias.
+
+**Cambio:** guardar la conversación de la petición de chat pendiente y mostrar `Checking…` solo si coincide con la visible. Conservar el bloqueo existente de envíos simultáneos. Una respuesta o un error tardío solo actualiza el chat que le corresponde; al crear automáticamente un chat durante el envío, su respuesta no fuerza la navegación si ya se abrió otro. Cambiar de persona y finalizar la petición limpian el estado pendiente. No cambia la API ni el agente.
+
+**Demo manual en el entorno habitual, a cargo del usuario:**
+
+1. Abrir A, enviar «hola» y cambiar a B mientras se procesa. B no debe mostrar `Checking…` ni el mensaje enviado en A.
+2. Volver a A antes de que termine: allí sí debe aparecer `Checking…`. Regresar a B y esperar: la respuesta de A no debe aparecer en B.
+3. Volver a A tras finalizar: se debe ver su respuesta y ningún `Checking…`.
+4. Si la petición falla tras cambiar a B, su error no debe aparecer en B. Una búsqueda o transferencia pendiente tampoco debe mostrar el indicador de respuesta del chat.
+
+**Checks:** `npm run typecheck`, formato de `app/page.tsx` y `git diff --check` correctos. La comprobación visual queda pendiente del usuario; no se ejecutó Chrome ni se añadió una dependencia de navegador.
