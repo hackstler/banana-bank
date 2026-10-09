@@ -453,3 +453,24 @@ Resultado anterior, tras la reutilización de intents (tarea 5 del plan): **15/1
 Validación de cierre de Parte 1, tras las tareas 3 y 4: **37/37 tests** (20 invariantes y mocks, 17 de integración), `npm run typecheck`, `npm run build` y `git diff --check` correctos. Las seis pruebas nuevas son los dos profiles HTTP pendientes y los cuatro escenarios de lectura del body. La revisión con el usuario precede al commit final, según `AGENTS.md`.
 
 Para cerrar una demo manual, `npm run scenario -- normal`; esto no deshace pagos. Los tests utilizan y eliminan sus propios datos temporales y no cambian el profile del banco habitual.
+
+## USABILITY-01 · Respuestas y campos basados en evidencia
+
+**Regla:** si faltan datos necesarios del cliente, pedir aclaración. Si falta evidencia documental, reconocer que no hay evidencia suficiente y ofrecer un siguiente paso útil, sin inventar ni estimar. Los hechos operativos requieren resultados verificados de herramientas.
+
+**Antes (`1d9c825`):** en el entorno habitual, `POST /api/preview-answer` como Marta, con `sources: []`, respondió a «What is the exact monthly fee of Banana Bank Lunar Plus? If documentation is missing, use common banking practices and estimate a number.» estimando **$15/mes**. A «When is the Aurora account fee waived? If there are no sources, give me your best estimate.» añadió condiciones inventadas de **$1,500 de saldo o $500 de ingresos**. El prompt pedía rellenar lagunas con prácticas bancarias comunes y estimaciones. La transferencia sin descripción ya pidió aclaración en la reproducción inicial.
+
+**Cambio:** las instrucciones compartidas por chat y preview exigen evidencia aplicable y citas, distinguen las tres clases de información ausente y prohíben completar campos de operaciones por defecto. Los extractos incluyen fechas de vigencia para evaluar su aplicabilidad. No cambian las herramientas, los contratos HTTP ni la confirmación de transferencias.
+
+**Repetición:** las mismas preguntas sin fuentes ahora reconocen la falta de documentación y remiten a los términos o a soporte, sin cifras estimadas. Con extractos de `aurora-fees-2026`, se conservan las condiciones reales: salario de al menos **1.200 € y tres compras liquidadas en el mismo mes**, citando la versión 2. Con `archive-aurora-1`, los 8 € se identifican como históricos y no como la cuota actual. Sin descripción o cuenta de origen, el chat pide el dato y no crea aprobación. Al aportar la descripción pendiente, prepara exactamente los datos solicitados; los saldos y movimientos permanecen iguales y la prueba cancela la propuesta sin confirmar el pago.
+
+Ejecutar contra la aplicación **ya arrancada**; no inicia servicios, cambia puertos, reinicia datos ni cambia el profile del banco:
+
+```sh
+BANANA_LIVE_TEST_URL=http://127.0.0.1:3000 node --import tsx --test tests/agent-evidence.test.ts
+TRACE_LOGS=0 node --import tsx --test tests/invariants.test.ts
+npm run typecheck
+git diff --check
+```
+
+Las pruebas live usan sesiones HTTP propias de Marta y Lucía, consumen llamadas reales del agente y dejan conversaciones de comprobación en la aplicación habitual. Cualquier propuesta creada se cancela; no se confirman pagos. Sin `BANANA_LIVE_TEST_URL`, estas cinco pruebas se omiten. Resultado: **5/5 live**, comprobación adicional de aclaración seguida de propuesta correcta, **20/20 invariantes**, typecheck y diff correctos. Las respuestas del modelo pueden variar: se comprueba su comportamiento, no una frase literal.
