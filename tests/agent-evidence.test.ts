@@ -23,7 +23,7 @@ async function client(userId: string) {
   return api;
 }
 const uncertainty =
-  /insufficient|cannot|can’t|can't|don’t have|do not have|no .*documentation|not .*provided|not .*establish|not .*current/i;
+  /insufficient|cannot|can’t|can't|don’t have|do not have|no .*documentation|not .*provided|(?:not|isn[’']t) .*establish|not .*current/i;
 const nextStep = /support|documentation|fee schedule|terms/i;
 const monetaryEstimate = /[$€]\s*\d|\b(?:EUR|USD)\s*\d|\d[\d,.]*\s*(?:euros?|dollars?)/i;
 
