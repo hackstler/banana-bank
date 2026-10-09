@@ -506,3 +506,13 @@ git diff --check
 ```
 
 Son pruebas contra la aplicación ya arrancada, con sesiones HTTP propias y conversaciones de comprobación; no inician servicios ni cambian puertos. La consulta de telemetría abre la BD local de la aplicación en modo lectura. Sin `BANANA_LIVE_TEST_URL` se omiten. Resultado: **5/5 de ámbito**, **5/5 de regresión de evidencia**, typecheck y diff correctos. Los rechazos se validan por comportamiento y ausencia de herramientas, no por una frase literal; el límite se implementa mediante instrucciones del modelo.
+
+## USABILITY-04 · Cursor de botones deshabilitados
+
+**Antes (`7b9ac70`):** el usuario observó un cursor de carga al pasar sobre Search con el buscador vacío. La captura muestra el botón deshabilitado; el cursor del sistema no aparece en la imagen. La causa está en la regla global `button:disabled`: aplicaba `cursor: wait` a cualquier botón deshabilitado, aunque no hubiera una petición en curso.
+
+**Cambio:** sustituir únicamente ese cursor por `not-allowed`, que comunica que la acción está deshabilitada. Se conservan la opacidad, las condiciones de bloqueo y los indicadores existentes de procesamiento (`Checking…`, `Preparing…`, `Confirming…`, etc.). No se añaden estados ni lógica de búsqueda.
+
+**Demo manual en el entorno habitual, a cargo del usuario:** dejar el buscador vacío y pasar sobre Search; debe aparecer el cursor de acción no disponible, sin cursor de espera. Repetir con el envío de chat vacío y otros botones deshabilitados. Con texto válido, el botón habilitado debe conservar su cursor de acción; pasar el cursor por sí solo no ejecuta una petición.
+
+**Checks:** formato CSS, `git diff --check` y `npm run build` correctos. La comprobación visual queda pendiente del usuario. No se añade un test que solo replique el valor literal del CSS.
