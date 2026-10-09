@@ -16,6 +16,7 @@ import { allChunks } from '../../../src/retrieval/store';
 import { errorDetails, traceLog } from '../../../src/trace';
 import type { Operation } from '../../../src/types';
 import { recordEvent } from '../../../src/telemetry';
+import { handleSpendLabRequest } from '../../../src/spend-lab/workflow';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 const json = (data: unknown, status = 200, headers: Record<string, string> = {}) =>
@@ -31,6 +32,7 @@ function conversationFor(id: string, userId: string) {
 async function handler(request: Request, context: RouteContext) {
   try {
     const { path } = await context.params;
+    if (path[0] === 'spend-lab') return handleSpendLabRequest(request, path.join('/'));
     if (request.method === 'POST') sameOrigin(request);
     const route = path.join('/');
     if (route === 'health')

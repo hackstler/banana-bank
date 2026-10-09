@@ -524,3 +524,90 @@ Son pruebas contra la aplicación ya arrancada, con sesiones HTTP propias y conv
 **Cambio:** renderizar la opción «Loading…» únicamente mientras `current` sea nulo, cuando el selector está deshabilitado. Con una persona cargada, el desplegable contiene solo los grupos de clientes y operadores.
 
 **Demo manual:** abrir el selector tras cargar la aplicación y después de cambiar de persona: no debe aparecer «Loading…». Durante la carga inicial o el cambio de sesión, el selector conserva su estado deshabilitado y el texto temporal. Typecheck, formato y diff correctos; comprobación visual a cargo del usuario.
+
+## SpendLab · Iteración 1: presupuesto y motor de escenarios
+
+**Regla:** simular la compra al contado de un móvil desde hoy, con saldo bancario separado del presupuesto de demo o del usuario. Los tests pueden fijar el reloj. El modelo documental no determina la fecha de compra. Esta entrega todavía no añade una pestaña, endpoints o llamadas de IA.
+
+**Escenario de partida:** SpendLab solo tenía especificaciones. Se añadieron pruebas del contrato y del ejemplo financiero; su primera ejecución falló por la ausencia del módulo. No se reprodujo un fallo del core existente.
+
+**Alternativas y decisión:** calcular por separado en navegador y servidor o compartir un motor puro. Se implementó el motor compartido en `src/spend-lab/`, sin imports de banco, SQLite, configuración documental o SDK OpenAI. Evalúa los saldos entre eventos, porque un ingreso al final del día puede ocultar una falta de liquidez anterior.
+
+El único fixture nuevo es `fixtures/spend-lab/lucia.json`: presupuesto mensual hipotético de Lucía. Sus próximas fechas se generan desde hoy. Los demás clientes no tienen perfil precargado; el presupuesto manual queda identificado como `user`, incluso al sustituir el de Lucía. Los contratos rechazan saldos o identidad enviados como parte del input de evaluación.
+
+**Repetición:** ejecutar la comprobación focalizada, sin iniciar servicios ni modificar datos del banco habitual:
+
+```sh
+node --import tsx --test tests/spend-lab.test.ts
+```
+
+El ejemplo fija el inicio en `2026-10-09`, saldo de 3.000 €, ingresos mensuales de 2.000 € el día 20, esenciales de 800 € el día 10, discrecionales de 0 €, móvil de 1.000 € y colchón de 1.500 €. Recorre hasta `2027-01-07` inclusive:
+
+| Alternativa | Resultado comprobado |
+| --- | --- |
+| Comprar hoy | Mínimo de 1.200 €; compromete el colchón. |
+| Vender por 500 € el 16 y comprar después | Mínimo de 1.700 €; respeta el colchón, condicionado a cobrar la venta. |
+| Esperar | Primera fecha compatible: 21 de octubre. El cobro del 20 ocurre después de la compra en el orden conservador. |
+
+Las **11/11 pruebas** verifican también reloj UTC real/inyectado, fuentes, fechas inválidas o pasadas, céntimos, duplicados, liquidez intradía, recurrencias en meses cortos y año bisiesto, reparto mensual exacto de discrecionales, margen cero, ausencia de fecha viable, problemas preexistentes, colchón exacto, inputs sin mutación y rechazo de aritmética insegura. Cambiar solo el motivo mantiene las cifras; la interpretación personal se incorporará en la siguiente iteración.
+
+**Checks realizados:** `npm run typecheck`, formato de los archivos nuevos y `git diff --check` correctos. La suite `TRACE_LOGS=0 npm test` pasó con **48 tests aprobados y 10 live omitidos** por no configurar `BANANA_LIVE_TEST_URL`. El primer intento dentro del sandbox bloqueó el puerto temporal de los tests de transferencias (`listen EPERM`); la repetición autorizada fuera del sandbox completó la regresión. No se modificaron `simulator/`, el agente existente ni los flujos de transferencias.
+
+La comprobación visual y el build de cierre quedan para la integración de la interfaz. Esta iteración queda pendiente de revisión del usuario antes del commit, según `AGENTS.md`.
+
+## SpendLab · Iteración 2: contexto, workflow e interpretación
+
+**Regla:** consultar cuentas y actividad del cliente por HTTP, validar el presupuesto, ejecutar el motor y realizar una única interpretación de IA. Ninguna evaluación crea una conversación, un pago o una aprobación. El saldo se vuelve a leer en cada evaluación y el reloj es actual; el histórico observado no se vuelve a sumar como gasto futuro.
+
+**Escenario de partida y decisión:** el catch-all existente no tenía endpoints de SpendLab y abría `appDb()` para sus rutas autenticadas. Se añadió un import y un despacho a `src/spend-lab/workflow.ts` antes de ese punto. El módulo contiene contexto, validación, cálculo e interpretación; no se modifica el agente, el simulador ni la lógica de transferencias. `GET /api/spend-lab/context` obtiene datos y presupuesto de demo; `POST /api/spend-lab/evaluate` devuelve `needs_input` o `complete`. Las respuestas usan `no-store`, runId e identidad de sesión.
+
+Las cuentas son imprescindibles y deben pertenecer al cliente. Un fallo exclusivo de movimientos permite continuar e identifica el histórico como no disponible. Los errores de solicitud incluyen campos; los de autorización no consultan el banco. Falta de datos impide llamar al modelo. Si falta la clave, hay timeout, refusal, output inválido o una preferencia incompatible, se mantienen las cifras con `assessment.status: 'unavailable'`.
+
+**Repetición técnica, sin servicios adicionales:**
+
+```sh
+TRACE_LOGS=0 node --import tsx --test tests/spend-lab.test.ts tests/spend-lab-workflow.test.ts
+```
+
+Resultado: **26/26 determinísticas**. Incluyen los 11 casos del motor y 15 de contexto, sesión/rol/origen, titularidad, campos pendientes, refresco de saldo, fuentes, cobertura limitada, fallback, evidencia y SDK. El test del catch-all usa HTTP simulado y verifica solo GET bancarios y una carpeta de datos de aplicación vacía: no afirma ser una prueba contra el banco habitual.
+
+**Prueba con el modelo real:** utiliza saldo y presupuesto controlados y dos llamadas reales al modelo configurado, una por evaluación; no inicia servicios, toca el banco o persiste runs. Requiere la clave habitual y acceso a OpenAI:
+
+```sh
+BANANA_SPEND_LAB_LIVE_MODEL=1 TRACE_LOGS=0 node --import tsx --test \
+  --test-name-pattern='SpendLab live model' tests/spend-lab-workflow.test.ts
+```
+
+La prueba se omite por defecto. Con motivo de hobby, el análisis final pregunta qué permitiría crear o disfrutar la nueva cámara frente al móvil actual. Con móvil roto para trabajar, pregunta si puede mantenerse la actividad hasta la fecha viable o usar una alternativa temporal. Las cifras de ambas evaluaciones son idénticas: comprar hoy cruza el colchón en 300 €, esperar deja 900 € sobre él y vender primero deja 200 €, condicionado al cobro. No se atribuyen nuevos ingresos al móvil.
+
+La primera ejecución real activó el fallback por salida inválida. Se restringió el esquema a evidencias y preferencias válidas. La revisión del texto posterior detectó además una inversión del signo del excedente y una frase cortada: se añadieron unidades/significado explícitos y una instrucción de concisión con frases completas. La repetición final pasó **1/1 live**, con dos reflexiones distintas, sin describir los 900 € como déficit y con tradeoffs completos. Las validaciones de IDs y formato no certifican todos los hechos del texto libre; esta evidencia corresponde a los dos casos comprobados. La integración usa el patrón de [OpenAI Structured Outputs](https://developers.openai.com/api/docs/guides/structured-outputs?api-mode=responses) y el SDK instalado, sin loop ni reintentos de la llamada.
+
+**Demo HTTP en la aplicación habitual ya arrancada:** seleccionar Lucía mediante una sesión propia, consultar su contexto y evaluar una compra. No hace falta resetear el banco ni abrir otros puertos:
+
+```sh
+SPEND_LAB_APP=http://127.0.0.1:3000
+SPEND_LAB_FILES=$(mktemp -d)
+curl -sS -c "$SPEND_LAB_FILES/lucia.cookies" \
+  -H 'Content-Type: application/json' -d '{"userId":"lucia"}' "$SPEND_LAB_APP/api/session"
+curl -sS -b "$SPEND_LAB_FILES/lucia.cookies" \
+  "$SPEND_LAB_APP/api/spend-lab/context" -o "$SPEND_LAB_FILES/context.json"
+curl -sS -b "$SPEND_LAB_FILES/lucia.cookies" -H 'Content-Type: application/json' \
+  -d '{"purchase":{"amountCents":100000,"motive":"treat","context":"I want a better camera for my hobby."},"accountIds":["acc-lucia"],"budget":null,"reserveCents":150000,"resale":null}' \
+  "$SPEND_LAB_APP/api/spend-lab/evaluate" -o "$SPEND_LAB_FILES/evaluation.json"
+```
+
+Revisar `context.json` y `evaluation.json`: saldo del banco actual, presupuesto `demo`, inicio de hoy y venta no disponible al no declararla. El resultado depende del saldo y calendario actuales; no se esperan los valores del fixture fijo en una cuenta modificada. Para otros clientes, usar sus cuentas y un presupuesto manual; null solicita ese presupuesto. Este recorrido manual queda disponible para el usuario, no se ha ejecutado contra la aplicación habitual en esta entrega.
+
+**Checks:** regresión `npm test` con **63 aprobadas y 11 live omitidas**; el caso de SpendLab real se ejecutó aparte como se indica arriba. Typecheck, formato y diff correctos. El sandbox bloqueó inicialmente el acceso del test real; las llamadas al modelo y los tests existentes que abren su banco temporal se ejecutaron con autorización fuera del sandbox. Interfaz, revisión visual y build de cierre pendientes de la tercera iteración. Revisión del usuario antes del commit según `AGENTS.md`.
+
+## SpendLab · Iteración 3: interfaz V1 y punto de partida de V1.1
+
+La sección `Spend Lab` está integrada en el menú de cliente. El recorrido recoge precio, motivo y contexto; permite elegir cuentas, revisar presupuesto/colchón y declarar una venta; muestra las tres alternativas y una gráfica SVG de 90 días. Editar genera una preview local con el motor compartido y retira la interpretación anterior hasta actualizarla. Cambiar de pestaña o persona desmonta y descarta el formulario y las solicitudes pendientes.
+
+**Demo manual:** seleccionar Lucía, abrir Spend Lab, introducir precio y motivo, continuar, elegir cuentas y revisar las hipótesis. Activar la venta con importe y fecha para comparar `Sell first`; ajustar precio, colchón o fecha de venta para explorar las curvas. Actualizar el análisis para refrescar banco y reflexión. Para otro cliente, introducir los cinco campos de presupuesto. Comprobar también navegación habitual, móvil, teclado y cambio de persona durante una evaluación.
+
+El usuario ha revisado favorablemente esta primera versión y solicita guardar el punto de partida antes de implementar V1.1. La prueba automatizada de navegador no se ejecutó: el usuario indicó que realizaría la comprobación visual. No se afirma validación automatizada de layout o del recorrido en navegador.
+
+**Checks del punto de partida:** las pruebas focalizadas del motor, workflow y formulario pasan con **32 aprobadas y una live omitida**; `npm run typecheck`, `npm run build` y `git diff --check` correctos. La última repetición de la suite completa dentro del sandbox dejó bloqueados los tests existentes que abren un servidor temporal (`listen EPERM`); su repetición fuera del sandbox se canceló. La regresión completa aprobada de la iteración 2 sigue siendo la evidencia anterior, no una ejecución completa de este cierre.
+
+Plan.md, Backend.md y Frontend.md separan V1 implementada y V1.1 aprobada para la siguiente implementación: categorías/producto, evidencia bancaria para presupuesto común e interpretación adaptada, sin persistencia. El historial se recomienda para una entrega posterior y permanece pendiente de decisión expresa.

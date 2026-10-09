@@ -1,0 +1,9 @@
+{
+  "userId": "lucia",
+  "version": "spend-lab-demo-v1",
+  "monthlyIncomeCents": 175000,
+  "monthlyEssentialExpensesCents": 90000,
+  "monthlyDiscretionaryExpensesCents": 30000,
+  "incomeDay": 2,
+  "essentialExpensesDay": 25
+}

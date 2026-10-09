@@ -1,6 +1,7 @@
 'use client';
 import { Fragment, useEffect, useRef, useState } from 'react';
 import type { Person } from '../src/types';
+import SpendLab from './components/spend-lab/SpendLab';
 type AnyRecord = Record<string, any>;
 const money = (cents: number) =>
   new Intl.NumberFormat('en-IE', { style: 'currency', currency: 'EUR' }).format(cents / 100);
@@ -40,6 +41,12 @@ function Icon({ name }: { name: string }) {
     transfer: (
       <>
         <path d="M4 7h15m-5-5 5 5-5 5M20 17H5m5 5-5-5 5-5" />
+      </>
+    ),
+    'spend-lab': (
+      <>
+        <path d="M9 3h6M10 3v6l-6 10a1 1 0 0 0 1 2h14a1 1 0 0 0 1-2L14 9V3M7 15h10" />
+        <path d="m10 17 1 1m3-1h.01" />
       </>
     ),
     document: (
@@ -383,6 +390,7 @@ export default function Home() {
     : [
         ['overview', 'overview', 'Overview'],
         ['chat', 'chat', 'Assistant'],
+        ['spend-lab', 'spend-lab', 'Spend Lab'],
         ['transfer', 'transfer', 'Transfers'],
         ['documents', 'document', 'Documents'],
       ];
@@ -499,7 +507,9 @@ export default function Home() {
               </button>
             </div>
           )}
-          {!current || !dashboard ? (
+          {current && !operator && tab === 'spend-lab' ? (
+            <SpendLab key={current.id} userId={current.id} />
+          ) : !current || !dashboard ? (
             <div className="loading">
               <span className="spinner" /> Getting things ready…
             </div>
