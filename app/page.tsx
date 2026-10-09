@@ -456,9 +456,11 @@ export default function Home() {
               disabled={!current}
               onChange={(e) => selectPerson(e.target.value)}
             >
-              <option value="" disabled>
-                Loading…
-              </option>
+              {!current && (
+                <option value="" disabled>
+                  Loading…
+                </option>
+              )}
               <optgroup label="Customers">
                 {people
                   .filter((p) => p.role === 'customer')

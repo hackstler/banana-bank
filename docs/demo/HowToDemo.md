@@ -516,3 +516,11 @@ Son pruebas contra la aplicación ya arrancada, con sesiones HTTP propias y conv
 **Demo manual en el entorno habitual, a cargo del usuario:** dejar el buscador vacío y pasar sobre Search; debe aparecer el cursor de acción no disponible, sin cursor de espera. Repetir con el envío de chat vacío y otros botones deshabilitados. Con texto válido, el botón habilitado debe conservar su cursor de acción; pasar el cursor por sí solo no ejecuta una petición.
 
 **Checks:** formato CSS, `git diff --check` y `npm run build` correctos. La comprobación visual queda pendiente del usuario. No se añade un test que solo replique el valor literal del CSS.
+
+## Selector de persona · Loading… solo durante la carga
+
+**Antes (`1914590`):** la captura del usuario muestra Carla seleccionada y el listado completo, pero también una opción deshabilitada «Loading…». Esa opción se renderizaba siempre, aunque ya existiera una persona activa.
+
+**Cambio:** renderizar la opción «Loading…» únicamente mientras `current` sea nulo, cuando el selector está deshabilitado. Con una persona cargada, el desplegable contiene solo los grupos de clientes y operadores.
+
+**Demo manual:** abrir el selector tras cargar la aplicación y después de cambiar de persona: no debe aparecer «Loading…». Durante la carga inicial o el cambio de sesión, el selector conserva su estado deshabilitado y el texto temporal. Typecheck, formato y diff correctos; comprobación visual a cargo del usuario.
