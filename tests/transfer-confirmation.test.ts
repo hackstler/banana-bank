@@ -6,6 +6,11 @@ import path from 'node:path';
 import net from 'node:net';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
+import React from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+
+Object.assign(globalThis, { React });
+const { default: TransferApprovals } = await import('../app/components/TransferApprovals');
 
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'banana-confirmation-'));
 process.env.DATA_DIR = temp;
@@ -174,6 +179,95 @@ test('normal: no bank effects until the customer confirms the reviewed proposal'
     history.data.messages,
   );
   assert.deepEqual((await api(`conversations/${otherConversation.data.id}`)).data.messages, []);
+});
+
+test('manual and agent proposals stay separate through dashboard refresh, cancellation and confirmation', async () => {
+  const first = (await api('conversations', {})).data.id;
+  const second = (await api('conversations', {})).data.id;
+  const before = await api('dashboard');
+  const manual = await api('actions', {
+    name: 'transfer_money',
+    arguments: { ...input, concept: 'manual-scope' },
+    intentId: 'manual-scope',
+    conversationId: null,
+  });
+  const cancelledChat = (await runTool('transfer_money', input, {
+    userId: 'ines',
+    conversationId: first,
+    runId: 'chat-scope-cancel',
+    intentId: 'chat-scope-cancel',
+  })) as any;
+  const confirmedChat = (await runTool('transfer_money', input, {
+    userId: 'ines',
+    conversationId: second,
+    runId: 'chat-scope-confirm',
+    intentId: 'chat-scope-confirm',
+  })) as any;
+  assert.equal(manual.data.status, 'requires_confirmation');
+  assert.equal(cancelledChat.status, 'requires_confirmation');
+  assert.equal(confirmedChat.status, 'requires_confirmation');
+
+  const renderPending = (approvals: Record<string, any>[]) =>
+    renderToStaticMarkup(
+      React.createElement(TransferApprovals, {
+        approvals,
+        renderApproval: (approval) => React.createElement('p', { key: approval.id }, approval.id),
+      }),
+    );
+  const pending = await api('dashboard');
+  assert.deepEqual(pending.data.accounts, before.data.accounts);
+  assert.equal(
+    pending.data.approvals.find((a: any) => a.id === manual.data.approvalId).conversationId,
+    null,
+  );
+  assert.deepEqual(
+    pending.data.approvals.filter((a: any) => a.conversationId === first).map((a: any) => a.id),
+    [cancelledChat.approvalId],
+  );
+  assert.deepEqual(
+    pending.data.approvals.filter((a: any) => a.conversationId === second).map((a: any) => a.id),
+    [confirmedChat.approvalId],
+  );
+  const html = renderPending(pending.data.approvals);
+  assert.ok(html.includes(manual.data.approvalId));
+  assert.ok(!html.includes(cancelledChat.approvalId));
+  assert.ok(!html.includes(confirmedChat.approvalId));
+
+  assert.equal(
+    (await api(`approvals/${cancelledChat.approvalId}/cancel`, {})).data.status,
+    'cancelled',
+  );
+  const afterCancel = await api('dashboard');
+  assert.deepEqual(afterCancel.data.accounts, before.data.accounts);
+  assert.ok(!afterCancel.data.approvals.some((a: any) => a.id === cancelledChat.approvalId));
+  assert.equal(renderPending(afterCancel.data.approvals), html);
+  assert.match(
+    (await api(`conversations/${first}`)).data.messages[0].content,
+    /proposal cancelled/,
+  );
+
+  assert.equal(
+    (await api(`approvals/${confirmedChat.approvalId}/confirm`, {})).data.status,
+    'completed',
+  );
+  const afterConfirm = await api('dashboard');
+  assert.ok(!afterConfirm.data.approvals.some((a: any) => a.id === confirmedChat.approvalId));
+  assert.equal(renderPending(afterConfirm.data.approvals), html);
+  assert.equal(
+    afterConfirm.data.accounts[0].balanceCents,
+    before.data.accounts[0].balanceCents - input.amountCents,
+  );
+  const secondHistory = (await api(`conversations/${second}`)).data.messages;
+  assert.match(secondHistory[0].content, /Transfer completed/);
+
+  assert.equal(
+    (await api(`approvals/${manual.data.approvalId}/cancel`, {})).data.status,
+    'cancelled',
+  );
+  const afterManualCancel = await api('dashboard');
+  assert.deepEqual(afterManualCancel.data.accounts, afterConfirm.data.accounts);
+  assert.ok(!renderPending(afterManualCancel.data.approvals).includes(manual.data.approvalId));
+  assert.deepEqual((await api(`conversations/${second}`)).data.messages, secondHistory);
 });
 
 test('agent transfer tool proposes without executing; model arguments cannot supply approval', async () => {

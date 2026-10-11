@@ -2,6 +2,7 @@
 import { Fragment, useEffect, useRef, useState } from 'react';
 import type { Person } from '../src/types';
 import SpendLab from './components/spend-lab/SpendLab';
+import TransferApprovals from './components/TransferApprovals';
 type AnyRecord = Record<string, any>;
 const money = (cents: number) =>
   new Intl.NumberFormat('en-IE', { style: 'currency', currency: 'EUR' }).format(cents / 100);
@@ -279,7 +280,7 @@ export default function Home() {
           amountCents: Math.round(Number(amount.replace(',', '.')) * 100),
           concept,
         },
-        conversationId,
+        conversationId: null,
       });
       if (g !== generation.current) return;
       setNotice(
@@ -850,11 +851,11 @@ export default function Home() {
                   </div>
                 </>
               )}
-              {tab !== 'chat' && dashboard.approvals?.length > 0 && (
-                <section className="panel approvals">
-                  <h2>Proposals awaiting confirmation</h2>
-                  {dashboard.approvals.map(approvalCard)}
-                </section>
+              {tab === 'transfer' && (
+                <TransferApprovals
+                  approvals={dashboard.approvals || []}
+                  renderApproval={approvalCard}
+                />
               )}
               {tab === 'overview' && operator && (
                 <>

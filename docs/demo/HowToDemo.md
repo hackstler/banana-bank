@@ -748,3 +748,18 @@ Reproducción fija en `tests/spend-lab-presentation.test.ts`: inicio `2026-10-11
 En esas condiciones `Wait` devuelve `no_viable_date`. Su tarjeta muestra `No compatible date` y explica que no encontró una compra que respete los límites elegidos en los próximos 60 días; la conclusión inicial también lo aclara. El aviso no se añade cuando sí existe una fecha compatible y no afirma que nunca se pueda comprar.
 
 Validación: **55 pruebas de SpendLab correctas, 2 live omitidas**; **92 de la suite completa correctas, 12 opcionales omitidas**. Typecheck y build correctos. Se conserva la interfaz revisada por el usuario y el commit sigue pendiente.
+
+## Transferencias · Separar propuestas del agente y del formulario
+
+**Reproducción y causa:** el usuario detectó una propuesta del Assistant en `Transfers`. El panel compartido mostraba todas las aprobaciones pendientes del dashboard en cualquier pestaña distinta del chat. Además, preparar una transferencia manual enviaba el ID de la conversación abierta, vinculándola al chat. Dos pruebas de presentación reproducen la selección anterior: se muestran propuestas de dos conversaciones junto a la manual y aparece el panel aunque solo existan propuestas del chat.
+
+**Decisión y cambio:** reutilizar `conversationId`, sin añadir un origen nuevo a la base de datos. Las propuestas con conversación mantienen su tarjeta en ese chat; las manuales se crean con `conversationId: null` y su panel se muestra exclusivamente en `Transfers`. `TransferApprovals.tsx` conserva el marcado y las tarjetas existentes, filtra las manuales y no muestra un panel vacío. No se modifican los endpoints, la confirmación/cancelación, el agente ni el simulador.
+
+### Revisión manual
+
+1. Como Inés, pedir al Assistant una transferencia a Carla por 5 € con concepto `demo-chat-scope`. Dejar pendiente la revisión y abrir `Transfers`, `Overview` y `Spend Lab`: la propuesta del chat no debe aparecer allí. Volver a la conversación: debe conservar su tarjeta.
+2. Cancelarla desde el chat. Comprobar el mensaje de cancelación y que la tarjeta desaparece, sin movimientos nuevos. Preparar otra propuesta y confirmarla solo si se desea ejecutar ese pago de demo; la tarjeta debe desaparecer y el resultado permanecer en la conversación.
+3. Con una conversación seleccionada, abrir `Transfers` y preparar una transferencia manual con concepto `demo-manual-scope`. La propuesta debe aparecer únicamente en `Transfers`, sin incorporarse a esa conversación. Volver al chat y después a `Transfers`: sigue pendiente en su sección. Cancelarla y comprobar que desaparece sin alterar saldos ni mensajes del chat.
+4. Mantener simultáneamente una propuesta manual y otra del chat. Cancelar la del chat: la manual debe seguir pendiente en `Transfers`. Cancelar después la manual. Cambiar de cliente y verificar que no aparecen propuestas ajenas.
+
+**Verificación:** dos pruebas SSR de presentación pasan después del filtro. Una prueba de integración usa base de datos y banco temporales, crea una propuesta manual y dos del agente en conversaciones distintas y verifica el HTML generado con las aprobaciones reales del dashboard. Cancelar una del chat no mueve dinero; confirmar la otra ejecuta una sola transferencia; ambas desaparecen del dashboard mientras la manual conserva su tarjeta. Cancelar la manual no modifica los mensajes del chat. No se usa el modelo ni se toca el banco habitual. La suite completa pasa con **95 pruebas correctas y 12 opcionales omitidas**; typecheck y build correctos. La revisión de navegador corresponde al usuario y el commit queda pendiente.
