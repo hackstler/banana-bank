@@ -44,7 +44,7 @@
   min-width: 0;
 }
 .spend-lab-panel,
-.spend-lab-chart,
+.spend-lab-consequences,
 .spend-lab-analysis,
 .spend-lab-data {
   background: #fffef9;
@@ -104,8 +104,7 @@
   line-height: 1.6;
 }
 .spend-lab-field input:focus-visible,
-.spend-lab-field textarea:focus-visible,
-.spend-lab-timeline input:focus-visible {
+.spend-lab-field textarea:focus-visible {
   outline: 2px solid var(--forest);
   outline-offset: 3px;
 }
@@ -248,40 +247,40 @@
   font-size: 12px;
   width: 100%;
 }
-.spend-lab-phone {
-  width: 156px;
-  height: 242px;
-  border: 5px solid var(--forest);
-  border-radius: 26px;
+.spend-lab-device-art {
+  width: 225px;
+  min-height: 250px;
+  border: 2px solid var(--forest);
+  border-radius: 24px;
   color: var(--forest);
   margin: 34px auto 34px;
-  padding: 27px 13px;
-  transform: rotate(-8deg);
+  padding: 22px;
+  transform: rotate(-5deg);
   background: #fffef0;
   box-shadow: 14px 15px 0 #194f4312;
   display: flex;
   flex-direction: column;
   justify-content: center;
 }
-.spend-lab-phone i {
-  position: absolute;
-  top: 8px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 50px;
-  height: 8px;
-  border-radius: 10px;
-  background: var(--forest);
+.spend-lab-device-icon {
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
 }
-.spend-lab-phone > span {
+.spend-lab-device-art > svg {
+  width: 100px;
+  height: 100px;
+  margin: 0 auto 18px;
+}
+.spend-lab-device-art > span {
   font-size: 23px;
   line-height: 1.25;
   letter-spacing: -0.7px;
 }
-.spend-lab-phone b {
+.spend-lab-device-art b {
   font-weight: 500;
 }
-.spend-lab-phone > div {
+.spend-lab-device-art > div {
   margin-top: 27px;
   font-size: 9px;
   letter-spacing: 0.6px;
@@ -309,6 +308,92 @@
   border-radius: 20px;
   padding: 6px 10px;
   display: inline-block;
+  overflow-wrap: anywhere;
+}
+.spend-lab-categories .spend-lab-motive > span {
+  min-height: 62px;
+  align-items: center;
+}
+.spend-lab-product-title {
+  overflow-wrap: anywhere;
+  color: var(--forest);
+  font-size: 14px;
+}
+.spend-lab-controls .spend-lab-section-heading > div {
+  flex: 1;
+  min-width: 0;
+}
+.spend-lab-bank-evidence {
+  border: 1px solid #dce4d5;
+  border-radius: 10px;
+  background: #f5f7ef;
+  padding: 16px;
+  margin-bottom: 22px;
+  min-width: 0;
+}
+.spend-lab-bank-evidence p {
+  font-size: 12px;
+  line-height: 1.6;
+}
+.spend-lab-bank-evidence .spend-lab-section-heading {
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.spend-lab-evidence-scroll {
+  max-height: 245px;
+  overflow: auto;
+}
+.spend-lab-bank-evidence table {
+  width: 100%;
+  font-size: 11px;
+  border-collapse: collapse;
+}
+.spend-lab-bank-evidence caption {
+  text-align: left;
+  color: var(--muted);
+  padding-bottom: 10px;
+}
+.spend-lab-bank-evidence th,
+.spend-lab-bank-evidence td {
+  padding: 9px 5px;
+  border-bottom: 1px solid var(--line);
+  text-align: right;
+  white-space: nowrap;
+  font-weight: 500;
+}
+.spend-lab-bank-evidence th:first-child {
+  text-align: left;
+  white-space: normal;
+}
+.spend-lab-bank-evidence th small {
+  display: block;
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 400;
+  margin-top: 3px;
+}
+.spend-lab-demo-button {
+  margin-bottom: 20px;
+}
+.spend-lab-sale-timing {
+  display: block;
+  margin-top: 20px;
+  font-size: 12px;
+}
+.spend-lab-sale-timing input {
+  display: block;
+  width: 100%;
+  margin: 14px 0 8px;
+  accent-color: var(--forest);
+}
+.spend-lab-sale-timing input:focus-visible {
+  outline: 2px solid var(--forest);
+  outline-offset: 4px;
+}
+.spend-lab-sale-timing > span {
+  display: flex;
+  justify-content: space-between;
+  color: var(--muted);
 }
 .spend-lab-accounts {
   margin: 24px 0 28px;
@@ -400,6 +485,7 @@
   font-weight: 500;
 }
 .spend-lab-reserve-panel {
+  align-self: start;
   background: #f4f5e9;
   border-radius: 12px;
   padding: 22px;
@@ -542,87 +628,6 @@
   margin-top: 6px;
   line-height: 1.6;
 }
-.spend-lab-legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px 20px;
-  margin-bottom: 15px;
-  font-size: 10px;
-  color: var(--muted);
-}
-.spend-lab-legend > span {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-}
-.spend-lab-legend i {
-  display: inline-block;
-  width: 16px;
-  height: 3px;
-  border-radius: 1px;
-}
-.spend-lab-legend .spend-lab-reserve-key {
-  height: 0;
-  border-top: 2px dashed #9b8050;
-}
-.spend-lab-plot {
-  overflow-x: auto;
-}
-.spend-lab-chart svg {
-  width: 100%;
-  height: auto;
-  min-width: 620px;
-  display: block;
-}
-.spend-lab-chart svg text {
-  fill: #71806c;
-  font:
-    13px Arial,
-    Helvetica,
-    sans-serif;
-}
-.spend-lab-inspection {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
-  font-size: 11px;
-  color: var(--muted);
-  border-top: 1px solid var(--line);
-  padding-top: 18px;
-  margin-top: 10px;
-}
-.spend-lab-inspection strong,
-.spend-lab-inspection b {
-  color: var(--ink);
-  font-weight: 500;
-}
-.spend-lab-inspection b {
-  margin-left: 7px;
-  font-size: 14px;
-}
-.spend-lab-timeline {
-  display: block;
-  color: #5b7059;
-  font-size: 11px;
-  font-weight: 500;
-  margin: 20px 0 0;
-}
-.spend-lab-timeline input {
-  display: block;
-  padding: 0;
-  width: 100%;
-  margin: 10px 0 4px;
-  accent-color: var(--forest);
-  border: 0;
-}
-.spend-lab-timeline > span {
-  display: flex;
-  justify-content: space-between;
-  color: var(--muted);
-  font-weight: 400;
-}
 .spend-lab-analysis {
   background: #edf1df;
   border-color: #dae3c7;
@@ -712,6 +717,46 @@
   text-align: center;
   padding: 0 15px;
 }
+.spend-lab-baseline-button {
+  margin-bottom: 20px;
+}
+.spend-lab-baseline-button[aria-pressed='true'] {
+  border-color: var(--forest);
+  background: #edf1e4;
+}
+.spend-lab-why {
+  font-size: 11px;
+  margin: 0 0 18px;
+  color: #50614f;
+}
+.spend-lab-why summary {
+  cursor: pointer;
+  width: fit-content;
+  color: var(--forest);
+  text-decoration: underline;
+}
+.spend-lab-why summary:focus-visible {
+  outline: 2px solid var(--forest);
+  outline-offset: 3px;
+}
+.spend-lab-why dl > div {
+  padding: 10px 0;
+  border-bottom: 1px solid #d5dfcd;
+}
+.spend-lab-why dd {
+  margin: 4px 0 0;
+}
+.spend-lab-why small {
+  display: block;
+  margin-top: 4px;
+  line-height: 1.6;
+}
+.spend-lab-why blockquote {
+  margin: 10px 0;
+  border-left: 2px solid #bbc9b1;
+  padding-left: 12px;
+  overflow-wrap: anywhere;
+}
 @media (max-width: 1100px) {
   .spend-lab-purchase-layout {
     grid-template-columns: minmax(0, 1fr) minmax(230px, 0.7fr);
@@ -740,7 +785,7 @@
     display: none;
   }
   .spend-lab-panel,
-  .spend-lab-chart,
+  .spend-lab-consequences,
   .spend-lab-analysis {
     padding: 20px;
   }
@@ -786,4 +831,76 @@
     padding: 12px;
     gap: 9px;
   }
+}
+
+.spend-lab-summary {
+  border-left: 4px solid var(--forest);
+  background: #f1f3e6;
+  border-radius: 0 12px 12px 0;
+  padding: 20px 24px;
+  line-height: 1.8;
+  font-size: 14px;
+}
+.spend-lab-consequences h2 {
+  font-size: 20px;
+  line-height: 1.6;
+  max-width: 760px;
+  margin: 10px 0 20px;
+}
+.spend-lab-moments {
+  list-style: none;
+  margin: 24px 0;
+  padding: 0 0 0 15px;
+}
+.spend-lab-moments li {
+  position: relative;
+  border-left: 2px solid #d8dfcf;
+  padding: 0 0 24px 28px;
+}
+.spend-lab-moments li:last-child {
+  padding-bottom: 0;
+}
+.spend-lab-moments li::before {
+  content: '';
+  position: absolute;
+  left: -7px;
+  top: 4px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--forest);
+  box-shadow: 0 0 0 4px var(--surface, #fff);
+}
+.spend-lab-moments .spend-lab-moment-risk::before {
+  background: #a34231;
+}
+.spend-lab-moments time {
+  font-size: 12px;
+  color: var(--muted);
+}
+.spend-lab-moments h3 {
+  font-size: 14px;
+  margin: 7px 0;
+}
+.spend-lab-moments strong {
+  font-size: 23px;
+  font-weight: 500;
+}
+.spend-lab-moments p {
+  font-size: 12px;
+  line-height: 1.8;
+  max-width: 660px;
+  margin: 8px 0 0;
+}
+.spend-lab-timeline-alternatives {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  border-top: 1px solid var(--line);
+  padding-top: 18px;
+}
+.spend-lab-timeline-alternatives h3 {
+  width: 100%;
+  font-size: 14px;
+  margin: 0;
 }

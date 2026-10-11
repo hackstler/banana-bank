@@ -7,11 +7,41 @@ const budgetCents = safeCents.min(0).max(10000000);
 const positiveCents = budgetCents.min(1);
 const isoDate = z.string().refine(isISODate, 'Use a valid YYYY-MM-DD date');
 
-export const purchaseSchema = z.strictObject({
+const legacyPurchaseSchema = z.strictObject({
   amountCents: positiveCents,
   motive: z.enum(['replace_broken', 'work_study', 'upgrade', 'treat']),
   context: z.string().trim().max(1000).optional().default(''),
 });
+
+export const productCategorySchema = z.enum(['mobile', 'computer', 'gaming', 'other_tech']);
+const productNameSchema = z.string().trim().min(1, 'Name the product you have in mind.').max(160);
+export const purchaseV11Schema = legacyPurchaseSchema.extend({
+  category: productCategorySchema,
+  productName: productNameSchema,
+});
+export const purchaseSchema = legacyPurchaseSchema
+  .extend({ category: productCategorySchema.optional(), productName: productNameSchema.optional() })
+  .superRefine((purchase, ctx) => {
+    if (purchase.category === undefined && purchase.productName !== undefined)
+      ctx.addIssue({ code: 'custom', path: ['category'], message: 'Choose a product category.' });
+    if (purchase.productName === undefined && purchase.category !== undefined)
+      ctx.addIssue({
+        code: 'custom',
+        path: ['productName'],
+        message: 'Name the product you have in mind.',
+      });
+  })
+  .transform((purchase) => ({
+    ...purchase,
+    category: purchase.category ?? 'mobile',
+    productName: purchase.productName ?? null,
+  }));
+const normalizedPurchaseSchema = legacyPurchaseSchema
+  .extend({ category: productCategorySchema, productName: productNameSchema.nullable() })
+  .refine((purchase) => purchase.productName !== null || purchase.category === 'mobile');
+export const calculationPurchaseSchema = z.union([purchaseSchema, normalizedPurchaseSchema]);
+export type Purchase = z.infer<typeof purchaseSchema>;
+export type ProductCategory = z.infer<typeof productCategorySchema>;
 
 function futureDate(start: string, maxDays: number) {
   const end = addDays(start, maxDays);
@@ -74,7 +104,7 @@ export function calculationInputSchema(start: string) {
       version: z.string().nullable(),
       values: budgetSchema(start),
     }),
-    purchase: purchaseSchema,
+    purchase: calculationPurchaseSchema,
     reserveCents: safeCents.min(0),
     resale: resaleSchema(start),
   });
@@ -82,10 +112,18 @@ export function calculationInputSchema(start: string) {
 
 export type Budget = z.infer<ReturnType<typeof budgetSchema>>;
 export type EvaluationInput = z.infer<ReturnType<typeof evaluationInputSchema>>;
-export type CalculationInput = z.infer<ReturnType<typeof calculationInputSchema>>;
+// Engine callers may still provide a legacy V1 purchase; parsing normalizes its metadata.
+export type CalculationInput = z.input<ReturnType<typeof calculationInputSchema>>;
 export type ResolvedBudget = CalculationInput['budget'];
 export type Source = 'bank' | 'demo' | 'user';
 export type ScenarioId = 'buy_now' | 'sell_first' | 'wait';
+export type ViewedScenarioId = ScenarioId | 'baseline';
+export type Evidence = {
+  id: string;
+  value: number | string | null;
+  sources: Source[];
+  meaning: string;
+};
 export type FinancialClass = 'cash_shortfall' | 'reserve_breach' | 'within_limits';
 
 export type ProjectionEvent = {
@@ -203,6 +241,23 @@ export type SpendLabContext = {
     mayBeTruncated: boolean;
   };
   demoBudget: ResolvedBudget | null;
+  budgetEvidence: BudgetEvidence;
+};
+
+export type ActivityGroup = {
+  accountId: string;
+  month: string;
+  creditsCents: number;
+  debitsCents: number;
+  movementCount: number;
+  from: string;
+  to: string;
+};
+export type BudgetEvidence = {
+  source: 'bank';
+  status: 'available' | 'unavailable';
+  coverage: SpendLabContext['history'];
+  groups: ActivityGroup[];
 };
 
 export type EvaluationResult =
@@ -216,8 +271,10 @@ export type EvaluationResult =
       calculationInput: CalculationInput;
       calculation: CalculationResult;
       assessment: Assessment;
+      evidence: Evidence[];
       methodology: {
         version: string;
+        principles: readonly string[];
         assumptions: readonly string[];
         sources: readonly { title: string; url: string }[];
       };

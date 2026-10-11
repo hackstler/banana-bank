@@ -18,12 +18,13 @@ export function resolveBudget(
   userId: string,
   manual: Budget | null,
   start: string,
+  demoInput: unknown = fixture,
 ): ResolvedBudget | null {
   if (manual !== null)
     return { source: 'user', version: null, values: budgetSchema(start).parse(manual) };
   if (userId !== 'lucia') return null;
-  const parsedDemo = demoSchema.safeParse(fixture);
-  if (!parsedDemo.success) throw new Error('Invalid Spend Lab demo budget configuration.');
+  const parsedDemo = demoSchema.safeParse(demoInput);
+  if (!parsedDemo.success) return null;
   const demo = parsedDemo.data;
   return {
     source: 'demo',

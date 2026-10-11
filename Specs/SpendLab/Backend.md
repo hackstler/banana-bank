@@ -2,9 +2,9 @@
 
 El backend ejecuta un workflow pequeño: validar, obtener contexto, comprobar presupuesto, calcular tres escenarios e interpretar la decisión con una única llamada de IA. [Plan](Plan.md) define el alcance y [Frontend](Frontend.md) consume el contrato.
 
-La sección V1 documenta la implementación actual. V1.1 especifica cambios propuestos, pendientes de validación; no describe código ya implementado. La persistencia se analiza aparte y no forma parte del alcance de implementación de V1.1 mientras no se decida expresamente.
+La sección V1 documenta la implementación original guardada en `d87a68e`. V1.1 describe la extensión ya implementada, pendiente de revisión del usuario y commit. La persistencia se analiza aparte y no forma parte de V1.1 mientras no se decida expresamente. Los checks y la demo están en [HowToDemo](../../docs/demo/HowToDemo.md).
 
-## V1 · Implementación actual
+## V1 · Implementación original
 
 ### Integración y fuentes
 
@@ -138,7 +138,7 @@ Pruebas con `node:test` y dependencias inyectables, sin nuevos puertos:
 
 Fixture de ejemplo con fecha fija `2026-10-09`: saldo 300000, ingresos mensuales 200000 con próximo cobro el 20, esenciales 80000 con próximo pago el 10, discrecionales cero, móvil 100000 y colchón 150000. Comprar hoy tiene mínimo de 120000. Vender por 50000 el día 16 y comprar después mantiene mínimo de 170000. Esperar encuentra el día 21: el cobro del 20 no puede financiar una compra que el orden conservador coloca antes de ese cobro. El test recorre los 90 días completos, no solo el primer mes.
 
-## V1.1 · Cambios propuestos, sin implementación
+## V1.1 · Cambios implementados, pendientes de revisión
 
 ### Contrato de compra concreto y compatibilidad
 
@@ -196,7 +196,13 @@ Se reutilizan `responses.parse`, modelo configurado, `store: false`, límites ac
 
 ### Superficie de cambio y pruebas
 
-Cambios previstos: `contracts.ts` (compra raw/normalizada y evidencia), `context.ts` y un helper puro de resumen si hace falta, adaptación mínima de `budget.ts`/`workflow.ts` para los tipos, `interpretation.ts` y tests de SpendLab. `engine.ts` solo adapta validación/tipos si lo requiere el contrato ampliado; sus reglas y cifras no cambian. No se modifica auth, catch-all fuera del despacho existente, simulador, agente, SQLite o transferencias.
+Archivos afectados: `contracts.ts` (compra raw/normalizada y evidencia), `context.ts`, los helpers puros `activity.ts` e `insights.ts`, `budget.ts` (ejemplo inválido opcional), `interpretation.ts`, `workflow.ts`, texto neutral y versión `spend-lab-method-v1.1` en `methodology.ts` y tests de SpendLab. `engine.ts` conserva sus reglas y cifras. No se modifica auth, catch-all, simulador, agente, SQLite o transferencias.
+
+El cierre de V1.1 devuelve en `complete.evidence` las mismas evidencias suministradas a la única llamada del modelo, para resolver los `evidenceIds` en pantalla. `insights.ts` lee los eventos, balances y fechas existentes para localizar el primer saldo negativo o cruce de colchón aplicable; no genera proyecciones ni modifica fórmulas. Incluye el evento, saldo previo/posterior y comparación con el baseline ese día, distinguiendo problemas iniciales y preexistentes. Los esenciales siguen siendo un agregado mensual declarado, nunca un recibo identificado.
+
+La interpretación recibe ese primer problema y sus IDs de fecha, saldo e importe cuando existe. El prompt conecta uso personal, sacrificio y alternativa; explica qué ocurre al comprar ahora contra la recomendación y permite recomendar un capricho compatible. Se mantiene una llamada, el modelo y los límites actuales.
+
+El último ajuste de claridad añade `firstBudgetProblem` derivado de todo el horizonte, incluidos los cruces de colchón anteriores a comprar, y evidencias de fecha/saldo. `firstProblem` conserva el alcance de la clasificación original; no se modifica `engine.ts`. `within_limits` exige saldo no negativo en todo el horizonte y colchón desde la compra, no durante todo el periodo previo. Los flags de problema preexistente no prueban que comprar no lo empeore. La IA debe reconocer el riesgo anterior y usar cifras/fechas simples; no cita ratios en meses. Las fuentes se deduplican. La respuesta de metodología separa `principles` generales de `assumptions` de la simulación: 90/60 días, recurrencia, agrupación/reparto y orden conservador son decisiones nuestras; tres meses de esenciales es una sugerencia simplificada, editable.
 
 - Mantener escenarios y payloads legacy de V1; misma proyección al cambiar únicamente categoría, nombre, motivo o contexto.
 - Evaluar para todos los clientes de `src/people.ts`, sin presupuesto de demo, mediante lecturas bancarias inyectadas y presupuesto declarado. No crear fixtures de perfiles para cada persona.

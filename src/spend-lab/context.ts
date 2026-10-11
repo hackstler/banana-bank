@@ -2,7 +2,8 @@ import { z } from 'zod';
 import { HttpError } from '../auth';
 import { bankRequest, BankError } from '../banking/client';
 import { resolveBudget } from './budget';
-import type { SpendLabContext } from './contracts';
+import { summarizeActivity } from './activity';
+import type { BankMovement, SpendLabContext } from './contracts';
 import type { captureSimulationClock } from './dates';
 
 export type BankReader = (
@@ -59,20 +60,23 @@ export async function loadContext(
     !!movements?.success && movements.data.every((movement) => ownedIds.has(movement.accountId));
   const observed = historyAvailable && movements?.success ? movements.data : [];
   observed.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const activity: BankMovement[] = observed.map((movement) => ({ ...movement, source: 'bank' }));
+  const history: SpendLabContext['history'] = {
+    source: 'bank',
+    status: historyAvailable ? 'available' : 'unavailable',
+    count: observed.length,
+    limit: 100,
+    from: observed.at(-1)?.createdAt ?? null,
+    to: observed[0]?.createdAt ?? null,
+    mayBeTruncated: observed.length === 100,
+  };
   return {
     userId,
     ...clock,
     accounts: accounts.data.map((account) => ({ ...account, source: 'bank' })),
-    activity: observed.slice(0, 5).map((movement) => ({ ...movement, source: 'bank' })),
-    history: {
-      source: 'bank',
-      status: historyAvailable ? 'available' : 'unavailable',
-      count: observed.length,
-      limit: 100,
-      from: observed.at(-1)?.createdAt ?? null,
-      to: observed[0]?.createdAt ?? null,
-      mayBeTruncated: observed.length === 100,
-    },
+    activity: activity.slice(0, 5),
+    history,
+    budgetEvidence: summarizeActivity(activity, history),
     demoBudget: resolveBudget(userId, null, clock.simulationStartDate),
   };
 }

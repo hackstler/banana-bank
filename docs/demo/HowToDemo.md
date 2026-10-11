@@ -611,3 +611,140 @@ El usuario ha revisado favorablemente esta primera versión y solicita guardar e
 **Checks del punto de partida:** las pruebas focalizadas del motor, workflow y formulario pasan con **32 aprobadas y una live omitida**; `npm run typecheck`, `npm run build` y `git diff --check` correctos. La última repetición de la suite completa dentro del sandbox dejó bloqueados los tests existentes que abren un servidor temporal (`listen EPERM`); su repetición fuera del sandbox se canceló. La regresión completa aprobada de la iteración 2 sigue siendo la evidencia anterior, no una ejecución completa de este cierre.
 
 Plan.md, Backend.md y Frontend.md separan V1 implementada y V1.1 aprobada para la siguiente implementación: categorías/producto, evidencia bancaria para presupuesto común e interpretación adaptada, sin persistencia. El historial se recomienda para una entrega posterior y permanece pendiente de decisión expresa.
+
+## SpendLab · V1.1: producto concreto y presupuesto común
+
+**Punto de partida:** V1 y las especificaciones de V1.1 están guardadas en `d87a68e`. La interfaz original solo evaluaba móviles genéricos y precargaba el presupuesto de Lucía. La API ya admitía a otros clientes con presupuesto manual. El usuario aprobó continuar con categorías/producto y evidencia bancaria, sin incorporar el historial.
+
+**Decisión e implementación:** ampliar los contratos y componentes propios en vez de crear otro workflow o agente. El input V1 sigue aceptándose y se normaliza como móvil sin nombre concreto; V1.1 exige categoría y producto en la interfaz. Una función pura resume entradas y salidas reales por cuenta/mes UTC antes de reducir la actividad visible a cinco movimientos. No clasifica gastos ni infiere ingresos futuros. Presupuesto y colchón empiezan sin valores para todos; el fixture de Lucía solo se carga con una acción explícita.
+
+El motor y sus tres escenarios permanecen intactos. Categoría/producto/motivo/contexto se transmiten a la única llamada de interpretación, con evidencia bancaria de las cuentas elegidas, métricas y supuestos. Se adaptan textos e ilustraciones SVG a las cuatro categorías. No se consulta catálogo o Internet ni se atribuyen características por el nombre del modelo. El presupuesto futuro permanece declarado y separado del histórico; los movimientos no se suman otra vez a la proyección.
+
+### Recorrido visual para el usuario
+
+1. Elegir cualquier cliente y abrir `Spend Lab`. Seleccionar Phones, Computers, Gaming & consoles u Other tech; escribir un producto concreto, precio y motivo. El contexto puede explicar uso, necesidad o urgencia.
+2. Continuar y seleccionar cuentas. Revisar `Observed bank activity`: entradas/salidas de meses reales, cuenta, número de movimientos y fechas. Puede incluir aperturas/transferencias y meses incompletos; no es una nómina o presupuesto detectado.
+3. Completar ingreso, esenciales, discrecionales y próximas fechas pendientes. Elegir colchón; cero es explícito. Con Lucía se puede usar `Load Lucía’s demo budget`, etiquetado como ejemplo. Editarlo lo convierte en presupuesto del usuario y no modifica el fixture. Cargar el ejemplo no sustituye el colchón elegido.
+4. Declarar opcionalmente venta de un dispositivo propio, importe y fecha. Evaluar y comparar curvas/mínimos/colchón con las tres alternativas actuales.
+5. Usar `Edit purchase & budget` para cambiar producto, categoría, motivo o contexto sin cambiar cifras. Continuar para volver a evaluar: la nueva interpretación debería conectar con esa utilidad. Los cambios financieros siguen produciendo preview, retirando el análisis anterior hasta actualizarlo.
+6. Cambiar persona/pestaña mientras se evalúa; comprobar que no aparece un resultado tardío en otro cliente. Revisar móvil, teclado y navegación core. Estos recorridos de navegador quedan a cargo del usuario, como solicitó; no se ejecutó una prueba automatizada de layout o interacción.
+
+Una cuenta sin actividad no se trata como una persona sin gastos. Si falla el histórico, se puede declarar presupuesto con el saldo disponible. Si falla el saldo, permanece el error/reintento. Si falla la IA, se conserva la comparación con `Personal analysis unavailable`.
+
+### Repetición automática y evidencia
+
+```sh
+TRACE_LOGS=0 node --import tsx --test tests/spend-lab*.test.ts
+TRACE_LOGS=0 npm test
+npm run typecheck
+npm run build
+git diff --check
+```
+
+**Resultados:** 41 pruebas deterministas de SpendLab aprobadas, una live omitida en esa ejecución. La suite completa pasa con **78 aprobadas y 11 live omitidas** (10 del agente existente y la opcional de SpendLab). Los tests de transferencias se ejecutaron fuera del sandbox porque necesitan abrir un servidor temporal; no cambian el banco habitual. Typecheck, build, formato y diff correctos. No se modificaron `simulator/`, agente, transferencias, `engine.ts`, `workflow.ts`, catch-all, `app/page.tsx`, schemas SQLite o dependencias.
+
+Las pruebas nuevas comprueban las cuatro categorías/nombre, compatibilidad legacy, mismos cálculos por producto, agrupación UTC, meses parciales/ausentes, aperturas/transferencias sin clasificación, cobertura truncada, sumas inseguras y ejemplo inválido opcional. Una prueba recorre los ocho clientes de `src/people.ts` con lectura bancaria inyectada y presupuesto manual; verifica actor y fuente `user`. Esto demuestra el contrato/workflow, no ocho sesiones de navegador. Otra prueba confirma que se resume toda la lectura de hasta 100 movimientos antes de limitar la actividad visible y que la IA solo recibe evidencia de cuentas elegidas, sin IDs de cuenta o IBAN.
+
+**Modelo real, ejecutado aparte:**
+
+```sh
+BANANA_SPEND_LAB_LIVE_MODEL=1 TRACE_LOGS=0 node --import tsx --test \
+  --test-name-pattern='SpendLab live model' tests/spend-lab-workflow.test.ts
+```
+
+Pasa **1/1 live**, con cuatro llamadas, una por evaluación, usando banco/presupuesto controlados y las mismas cifras. No se consulta ni escribe el banco habitual. Se revisaron los cuatro textos: iPhone para hobby fotográfico, MacBook Air para un portátil que se detiene durante llamadas de trabajo, Nintendo Switch para jugar con amigos y auriculares sin contexto adicional. Las preguntas cambian con el uso declarado; el ordenador no se promete como solución comprobada, gaming reconoce el ocio y el caso escaso pregunta por la mejora buscada. No se aportan fichas técnicas o precios de mercado. El modelo mantiene los sacrificios de colchón y condiciona la venta al cobro. Estas son las cuatro muestras revisadas; el schema y los IDs no garantizan toda afirmación futura del texto libre.
+
+**Historial:** no implementado. Las evaluaciones continúan siendo estado local y se pierden al salir de la sección. La propuesta de persistencia y sus decisiones pendientes siguen separadas en las especificaciones. V1.1 queda pendiente de revisión visual del usuario antes del siguiente commit.
+
+## SpendLab · Cierre visual de V1.1: consecuencias y evidencia
+
+**Problema y decisión:** la selección descartaba `baseline` y destacaba `Buy now`; el panel de colchón se estiraba con la columna del presupuesto. Las citas del modelo no se mostraban y la gráfica no señalaba el primer evento que comprometía la compra. Se permite seleccionar la curva sin compra, se alinea el panel al inicio y se añaden `Why?`, marcadores y comparación de un mismo día. El motor, sus fórmulas, los eventos y los tres escenarios permanecen iguales.
+
+`complete.evidence` expone exactamente las evidencias de la única interpretación. Los tradeoffs muestran sus IDs citados, valores y fuentes; el motivo muestra las declaraciones y la recomendación las cifras de la alternativa, sin atribuirle citas que no existen. El primer problema se deriva de los eventos ya calculados: fecha, evento, saldo previo/posterior y si el baseline también cruza ese límite ese día. Los esenciales son un agregado declarado, no un recibo bancario identificado. Editar conserva la preview y retira análisis/citas antiguos.
+
+### Reproducción controlada: se puede pagar hoy y se pierde protección después
+
+```bash
+TRACE_LOGS=0 node --import tsx --test tests/spend-lab-insights.test.ts tests/spend-lab-presentation.test.ts
+```
+
+La prueba usa inicio fijo `2026-10-11`, saldo controlado de 3.000 €, precio de 1.000 €, colchón de 1.500 €, ingreso mensual de 2.000 € el 25, esenciales mensuales de 800 € el 18 y discrecionales de cero. La venta declarada es de 500 € el 18. No se modifica el saldo del simulador ni se introduce este presupuesto en la lógica.
+
+| Momento o alternativa | Resultado comprobado |
+| --- | --- |
+| Comprar hoy | Quedan 2.000 € tras pagar, por encima del colchón. |
+| Siete días después, 18 de octubre | Los esenciales previstos bajan de 2.000 € a 1.200 €: primer cruce, 300 € bajo el colchón. |
+| Sin esa compra, ese día | Mínimo de 2.200 €; no cruza el colchón. |
+| Vender primero y comprar el 18 | Mínimo de 1.700 € en el horizonte; no cruza el colchón, condicionado al cobro de la venta. |
+| Esperar | Primera fecha compatible: 26 de octubre. Se comprueba todo el horizonte de 90 días. |
+
+La presentación SSR verifica que `baseline` destaca su curva, el marcador corresponde al evento/fecha, las alternativas muestran sus mínimos en el mismo día y `Why?` resuelve solo las evidencias indicadas. Otras pruebas cubren saldo inicial negativo, problemas preexistentes, colchón exacto y caída intradía que desaparece en el saldo al cierre. Son pruebas de lógica y HTML generado; no sustituyen la revisión del layout en navegador.
+
+### Demo manual con el saldo bancario actual
+
+1. Entrar como un cliente con cuentas seleccionadas cuyo total **B sea al menos 1.800 €**. Usar ese saldo real sin modificar/resetear el banco. Introducir un móvil de 1.000 €, motivo de disfrute y contexto: “My phone works, but I want to enjoy photography on weekend walks.”
+2. Completar manualmente ingresos de 2.000 €, esenciales de 800 €, discrecionales de cero. Próximos esenciales: **hoy + 7 días**; próximo ingreso: **hoy + 14 días**. Elegir colchón **B − 1.500 €**. Son hipótesis declaradas para la demo, separadas de los registros bancarios. No cargar el ejemplo de Lucía.
+3. Declarar venta de un dispositivo propio por 500 € con cobro el mismo día de los esenciales. Evaluar y seleccionar `Buy now` si el modelo destaca otra alternativa.
+4. Comprobar “Room to pay today. Less protection later.”: al pagar quedan **B − 1.000 €**, 500 € sobre el colchón; siete días después los esenciales dejan **B − 1.800 €**, 300 € bajo él. `Show this moment` lleva el cursor al evento y muestra su importe y saldo. La línea vertical mantiene esa fecha al comparar.
+5. Seleccionar `Sell first`: el mínimo es **B − 1.300 €**, 200 € sobre el colchón, condicionado a la venta. Seleccionar `Wait`: la fecha compatible es el día siguiente al primer ingreso previsto, porque el orden conservador coloca la compra antes del cobro en un mismo día. Comparar las cifras de las cuatro curvas en la fecha señalada y recorrer hasta el final del horizonte.
+6. Abrir `Why?` en cada tradeoff y contrastar las cifras/orígenes. Revisar la utilidad personal, la pregunta y `If you buy now instead` cuando la recomendación sea otra. Si se recomienda no comprar, debe aparecer seleccionado `Viewing: Without this purchase`, sin destacar `Buy now`.
+7. Cambiar a gaming, precio 20 €, producto “A game I chose”, contexto “I want to spend a few evenings playing this game with friends.” Mantener presupuesto y colchón; actualizar. El consejo puede aceptar el disfrute asumible y debe cambiar su lectura/pregunta. La recomendación concreta del modelo puede variar entre ejecuciones.
+8. Revisar altura del panel de colchón, móvil, teclado, preview sin evidencias obsoletas y cambio de persona/pestaña. La revisión visual y el commit siguen pendientes del usuario.
+
+### Checks y análisis real
+
+- Suite completa: **86 pruebas correctas, 12 opcionales omitidas**, sin fallos; incluye regresión de transferencias/idempotencia/reconciliación y agente existente con dependencias controladas.
+- SpendLab: **49 correctas, 2 live omitidas** en la ejecución habitual.
+- `npm run typecheck` y `npm run build`: correctos. Sin nuevas dependencias ni cambios en simulador, agente o transferencias.
+
+```bash
+BANANA_SPEND_LAB_LIVE_MODEL=1 TRACE_LOGS=0 node --import tsx --test --test-name-pattern='SpendLab live decision consequences' tests/spend-lab-workflow.test.ts
+```
+
+Pasa **1/1 live**, con dos llamadas al modelo configurado, una por evaluación y banco controlado. En la muestra con fecha fija `2026-10-09`, móvil de 1.000 € y esenciales el 16, recomienda esperar: cita la caída a 1.200 €, 300 € bajo el colchón, y pregunta qué quiere disfrutar/capturar que su móvil actual no permita. Para el juego de 20 €, recomienda comprar: cita mínimo de 2.180 €, 680 € sobre el colchón, y pregunta por las veladas con amigos. No inventa prestaciones, precios o ingresos. Es evidencia de estas dos muestras, no garantía universal del texto libre.
+
+**Estado:** cambios preparados sin commit, a la espera de revisión de la experiencia en la interfaz. La persistencia continúa fuera de este cierre.
+
+## SpendLab · Revisión final: claridad y línea temporal
+
+Esta sección sustituye las instrucciones de presentación de la gráfica anteriores; los inputs de reproducción siguen siendo válidos. El usuario ha pedido conservar el motor y cambiar la experiencia para personas sin conocimientos financieros.
+
+**Reproducción y decisión:** las tarjetas asociaban la fecha de compra al mínimo del horizonte; el `Why?` de recomendación mostraba todos los campos de un escenario; las fuentes podían duplicarse. Además, un presupuesto con saldo de 3.000 €, colchón de 1.500 €, esenciales de 2.000 € el 12 de octubre e ingreso mensual de 3.000 € el 20 permitía esperar para comprar por 500 € el 21: el colchón se preservaba desde la compra, pero el mínimo anterior era de 1.000 €. Comprar hoy lo agravaba a 500 €, pese a que el flag de problema añadido era falso. No se cambia esa fórmula ni la elegibilidad: se corrige cómo explicamos el alcance y el agravamiento.
+
+**Implementación:** se elimina `ScenarioChart.tsx`, sus curvas/ejes/cursor y CSS sin uso. `ScenarioCards.tsx` conserva selección y separa fechas de compra/mínimo. `ScenarioTimeline.tsx` presenta compra, primer problema presupuestario, primer problema desde la compra si es diferente y saldo mínimo. Los roles coincidentes se agrupan en un único evento; los gastos conservan su origen de hipótesis, no recibos identificados. Sin riesgo no hay línea temporal. La conclusión de comprar ahora está antes de las tarjetas y no se repite para esa opción segura; seleccionar otro escenario muestra una conclusión referida solo a él. Se conserva el control de fecha de venta con estilos propios.
+
+Las ayudas del formulario explican importe, propósito y efecto de cada campo, previsiones separadas de banco y reparto de opcionales por día. `Why?` conserva citas reales y ceros relevantes en euros, pero omite nulos, ratios en meses, referencias desconocidas y fuentes duplicadas. La recomendación muestra solo cifras clave. La IA mantiene una llamada y centra su texto en uso, consecuencias y alternativas, sin equivalencias en meses. `firstBudgetProblem` y sus evidencias se derivan de eventos existentes para exponer riesgos anteriores a comprar. La metodología distingue referencias generales (`principles`) de simplificaciones propias (`assumptions`), incluida la sugerencia editable de tres meses de esenciales frente a la referencia general de tres a seis meses de gastos normales.
+
+### Recorrido manual vigente
+
+1. Usar los inputs de la demo anterior con saldo real seleccionado **B ≥ 1.800 €**: precio 1.000 €, colchón B − 1.500 €, ingreso mensual 2.000 € hoy + 14 días, esenciales 800 € hoy + 7 días, opcionales cero y venta prevista 500 € el día de los esenciales. No resetear el banco ni cargar presupuestos por defecto.
+2. Evaluar. La conclusión explica que pagar hoy deja B − 1.000 €, pero los esenciales llevan a B − 1.800 €, bajo el colchón. Seleccionar `Buy now`: solo deben aparecer compra y caída/mínimo agrupados, con el importe previsto de 800 € y saldo antes/después. No hay gráfica ni exploración de 91 días.
+3. Seleccionar `Sell first`, `Wait` y `Without this purchase`: los mismos inputs dan opciones sin riesgo, con una conclusión breve y sin línea temporal. Las tarjetas mantienen fechas y mínimos para comparar; vender primero sigue condicionado a cobrar. Si la IA recomienda baseline, esa opción queda seleccionada.
+4. Probar gaming de 20 € para disfrutar con amigos. Con las mismas previsiones, la conclusión de comprar ahora es suficiente y no se añade otra línea temporal. Revisar personalización y `Why?`, sin meses ni campos irrelevantes.
+5. Para reproducir el problema **anterior a una compra aplazada** con saldo real B ≥ 2.000 €: precio 500 €, colchón 1.500 €, esenciales mensuales **B − 1.000 €** mañana, ingresos mensuales **B** hoy + 9 días, opcionales cero. Son hipótesis controladas de demo, no inferencias bancarias. Esperar al día siguiente del cobro encaja desde la compra, pero su línea temporal debe mostrar el problema anterior de 1.000 €. Comprar hoy lo empeora a 500 €. Declarar opcionalmente venta de 500 € para el día siguiente al cobro y comparar su alcance también.
+6. Revisar móvil y teclado, foco de controles, edición sin análisis antiguo, formulario con ayudas y cambios de persona/pestaña. El usuario realiza la revisión de navegador antes del commit; no se afirma haber automatizado el layout.
+
+### Verificación
+
+```bash
+TRACE_LOGS=0 node --import tsx --test tests/spend-lab*.test.ts
+npm run typecheck
+npm run build
+```
+
+- SpendLab: **53 correctas, 2 live omitidas**. Las seis pruebas de presentación cubren riesgo/agrupación, alternativas sin riesgo, capricho seguro, mínimo negativo intradía con cierre positivo, presupuesto previo/agravamiento, fechas reales de las tarjetas, baseline y filtrado de evidencias. El workflow comprueba una llamada y riesgo previo enviado al modelo, con fuentes deduplicadas.
+- Suite completa: **90 correctas, 12 opcionales omitidas**, sin fallos, incluyendo regresión del agente, transferencias, idempotencia y reconciliación con dependencias controladas.
+- Typecheck y build correctos. El diff de `engine.ts`, simulador, agente, dependencias y flujos bancarios permanece vacío.
+- La prueba live `SpendLab live decision consequences` pasa **1/1**, con dos llamadas al modelo. Se revisaron las muestras: recomienda esperar para el móvil que baja a 1.200 € el día de los esenciales y acepta el juego de 20 € que deja mínimo de 2.180 €. Ambas interpretan el motivo y preguntan por su utilidad sin ratios en meses ni características inventadas. Esta muestra no garantiza todo texto futuro.
+
+**Pendiente:** revisión de la experiencia en la interfaz. Sin commit y sin persistencia.
+
+## SpendLab · Corrección de la explicación del mínimo diario
+
+El usuario mantiene la interfaz y señala que el mínimo del 1 de noviembre se atribuía solo al último gasto diario de 16,66 €, omitiendo el pago esencial anterior y el ingreso posterior. La presentación conserva fecha, mínimo, tarjetas y estructura; ahora explica las operaciones del día hasta alcanzar el mínimo, sus saldos sucesivos y las operaciones posteriores. Si mínimo y primer problema coinciden, se utiliza esa misma explicación completa y se conserva el aviso de presupuesto preexistente. No se cambian cálculos, eventos, dependencias o llamadas al modelo.
+
+Reproducción fija en `tests/spend-lab-presentation.test.ts`: inicio `2026-10-11`, saldo 3.000 €, compra 1.000 €, colchón 1.800 €, ingreso mensual 2.000 €, esenciales 1.000 € y opcionales 500 €. Próximos ingreso y esenciales: `2026-11-01`, sin venta. Ese día, el saldo de 1.661,27 € baja a 661,27 € por esenciales, después a **644,61 €** por 16,66 € diarios y finalmente sube a 2.644,61 € al ingresar 2.000 €. La explicación distingue el mínimo anterior del saldo después del ingreso, utilizando el orden ya calculado. Son inputs controlados de test, sin cambios al banco.
+
+En esas condiciones `Wait` devuelve `no_viable_date`. Su tarjeta muestra `No compatible date` y explica que no encontró una compra que respete los límites elegidos en los próximos 60 días; la conclusión inicial también lo aclara. El aviso no se añade cuando sí existe una fecha compatible y no afirma que nunca se pueda comprar.
+
+Validación: **55 pruebas de SpendLab correctas, 2 live omitidas**; **92 de la suite completa correctas, 12 opcionales omitidas**. Typecheck y build correctos. Se conserva la interfaz revisada por el usuario y el commit sigue pendiente.

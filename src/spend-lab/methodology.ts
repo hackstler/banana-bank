@@ -1,13 +1,19 @@
 export const methodology = {
-  version: 'spend-lab-method-v1',
+  version: 'spend-lab-method-v1.1',
+  principles: [
+    'Consider when money arrives and when payments are due, not just whether the monthly total balances.',
+    'Keep accessible money for unexpected costs. The appropriate cushion depends on your circumstances.',
+    'Emergency-fund references discuss three to six months of normal expenses. Our three-month essentials suggestion is a simplified starting point you can change.',
+    'Financial capacity and personal usefulness are separate: enjoyment can be a valid reason to buy.',
+  ],
   assumptions: [
-    'This is a cash-flow projection from current bank balances, not a profit forecast or bank policy.',
-    'Budget amounts and future dates are demo or user assumptions, not verified recurring bank transactions.',
-    'Monthly essentials are aggregated on one date; discretionary spending is spread across calendar days.',
-    'Each day applies commitments, purchase and then income. Sell first credits the declared sale immediately before purchase.',
-    'The suggested reserve is three months of essential expenses; the customer chooses the actual reserve.',
-    'Wait searches the next 60 days and checks liquidity through a common 90-day horizon, including intraday lows.',
-    'A phone can be worth buying for personal reasons. Financial capacity and its personal value are separate questions.',
+    'We project 90 days from today using selected bank balances and your estimates (or an explicitly loaded demo budget). This is not a verified forecast or bank policy.',
+    'For simplicity, income and necessary expenses repeat monthly. All necessary costs are grouped into one payment on your chosen date.',
+    'We divide optional monthly spending across each calendar day, including only the days remaining in the current month.',
+    'With no payment times available, we assume expenses leave first, then the purchase is paid, then income arrives. This conservative order can expose a shortfall even if the day ends positive.',
+    'Sell first assumes payment from the declared sale immediately before buying, after that day’s planned expenses. That sale is not guaranteed.',
+    'Wait searches at most 60 days within the same 90-day window, not 90 new days after buying. Risks beyond that window are not assessed.',
+    'A purchase fits when no balance is negative during the whole window and your chosen cushion is preserved from purchase onward. Earlier cushion problems remain visible and are not fixed by waiting.',
   ],
   sources: [
     {

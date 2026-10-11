@@ -2,9 +2,9 @@
 
 SpendLab ayuda a un cliente de Banana Bank a decidir sobre la compra al contado de un móvil. Combina su saldo bancario actual, un presupuesto explícito y su motivo para comparar comprar ahora, vender primero el móvil anterior y esperar. La experiencia destaca por una gráfica interactiva y un análisis que conecta las consecuencias financieras con lo que la persona busca conseguir.
 
-La V1 está implementada, incluida la interfaz, y el usuario ha revisado favorablemente su primera versión. Usa la fecha actual independiente del sistema documental, un ejemplo de presupuesto para Lucía y presupuesto manual para el resto. La V1.1 descrita al final es una evolución pendiente de validación e implementación. Esta revisión modifica únicamente Plan.md, Backend.md y Frontend.md; no añade código ni persistencia.
+La V1 está guardada en `d87a68e`, incluida la interfaz, y el usuario ha revisado favorablemente su primera versión. Usa la fecha actual independiente del sistema documental, un ejemplo de presupuesto para Lucía y presupuesto manual para el resto. La V1.1 descrita al final está implementada tras aprobar las especificaciones y queda pendiente de revisión visual del usuario y commit. No incorpora persistencia. La evidencia de validación y el recorrido están en [HowToDemo](../../docs/demo/HowToDemo.md).
 
-## V1 · Base actual
+## V1 · Base original conservada como referencia
 
 ### Documentos y decisiones compartidas
 
@@ -87,11 +87,11 @@ El cierre verifica también Overview, Assistant, Transfers, Documents y selector
 
 Las decisiones se revisan primero en estas especificaciones y después en la tarea correspondiente. La separación entre contexto, cálculo e interpretación deja abiertas futuras categorías y financiación, sin incorporarlas al MVP durante una iteración ya iniciada.
 
-## V1.1 · Evolución propuesta, pendiente de validación
+## V1.1 · Evolución implementada, pendiente de revisión
 
 La V1.1 amplía el contexto de decisión y la ayuda para preparar el presupuesto. Reutiliza la sección, los dos endpoints, el motor financiero, la gráfica y la interpretación existentes. No rehace SpendLab ni incorpora financiación, investigación de productos o un loop de agente.
 
-| Aspecto     | V1 actual                                                                             | V1.1 propuesta                                                                                                                                                                                                    |
+| Aspecto     | V1 original                                                                           | V1.1                                                                                                                                                                                                              |
 | ----------- | ------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Clientes    | Todos los clientes pueden evaluar; Lucía tiene demo y el resto introduce presupuesto. | Mismo acceso para todos, con evidencia bancaria visible para preparar y confirmar las previsiones. Ningún cliente depende de un fixture.                                                                          |
 | Presupuesto | Demo de Lucía precargada; cinco campos manuales para los demás.                       | Recorrido común con saldo y actividad reales disponibles; completar/confirmar los cinco campos. Lucía conserva una opción explícita de cargar el ejemplo, sin ser el presupuesto por defecto del nuevo recorrido. |
@@ -129,9 +129,13 @@ Las alternativas cuantificadas siguen siendo las tres actuales. Reparar, conserv
 | 2. Experiencia e interpretación | Controles de categoría/producto, textos neutrales de dispositivo, evidencia al revisar presupuesto y prompt actualizado.   | Cuatro categorías; análisis distintos según producto y motivo, ninguna característica inventada; editar retira texto anterior, cambio de persona y fallback.                       |
 | 3. Cierre                       | Ajustes necesarios de integración y documentación de demo.                                                                 | Regresión V1/core, tests pertinentes, typecheck, build y diff; revisión visual del usuario. Sin historial.                                                                         |
 
-Cada iteración mantiene el ciclo de `AGENTS.md` y actualiza HowToDemo cuando se implemente. Esta fase solo cambia las tres especificaciones. No se modifican `simulator/`, agente existente, transferencias, aprobaciones, navegación de operadores, persistencia, dependencias o infraestructura. El reloj actual, céntimos, horizonte, colchón, reventa declarada y preview conservan las reglas V1.
+Cada iteración mantiene el ciclo de `AGENTS.md` y actualiza HowToDemo con la evidencia real. La revisión inicial cambió solo las tres especificaciones; su implementación posterior queda dentro del alcance aprobado. No se modifican `simulator/`, agente existente, transferencias, aprobaciones, navegación de operadores, persistencia, dependencias o infraestructura. El reloj actual, céntimos, horizonte, colchón, reventa declarada y preview conservan las reglas V1.
 
 La aceptación exige completar una evaluación para cualquiera de los ocho clientes sin cargar el ejemplo de Lucía. No exige que el banco contenga datos suficientes para rellenar todo: exige usar los disponibles, explicar límites y solicitar el resto. Cambiar solo categoría/producto/motivo mantiene la proyección financiera y cambia la interpretación cuando el contexto lo justifica.
+
+El usuario ha revisado favorablemente V1.1 y pide cerrar cinco ajustes: selección coherente del baseline, panel de colchón sin estiramiento, `Why?` con evidencias existentes, descubrimiento visual del primer problema futuro y reflexión ligada al motivo y a las consecuencias de comprar contra el consejo. Se reutilizan cálculo, eventos y una llamada al modelo; no se añaden fórmulas, dependencias ni proyecciones. La aceptación incorpora un caso asumible hoy que cruza el colchón después y las mismas condiciones con venta/espera que evitan ese problema. HowToDemo recoge reproducción y checks. Estos ajustes quedan pendientes de revisión en la interfaz antes del commit.
+
+La última revisión aprobada prioriza comprensión: ayudas cortas, conclusión antes de comparar, fechas de compra y mínimo separadas, `Why?` reducido y metodología con criterios/simplificaciones diferenciados. La gráfica se elimina y se sustituye por momentos relevantes del escenario seleccionado; sin riesgo basta una conclusión. La aceptación también cubre problemas de presupuesto antes de una compra aplazada compatible, agravamiento al comprar y mínimos intradía. No se cambia el motor ni se añaden dependencias. Se elimina presentación sin uso y el commit continúa pendiente de revisión visual.
 
 ### Historial · Evaluación de una evolución posterior
 

@@ -1,13 +1,16 @@
 import { z } from 'zod';
-import { evaluationInputSchema, purchaseSchema } from '../../../src/spend-lab/contracts';
+import { evaluationInputSchema, purchaseV11Schema } from '../../../src/spend-lab/contracts';
 import type {
   EvaluationInput,
   EvaluationResult,
   SpendLabContext,
+  ProductCategory,
 } from '../../../src/spend-lab/contracts';
 import { calculateScenarios } from '../../../src/spend-lab/engine';
 
 export type FormValues = {
+  category: ProductCategory | '';
+  productName: string;
   price: string;
   motive: EvaluationInput['purchase']['motive'] | '';
   context: string;
@@ -24,6 +27,8 @@ export type FormValues = {
   useDemo: boolean;
 };
 export const emptyForm: FormValues = {
+  category: '',
+  productName: '',
   price: '',
   motive: '',
   context: '',
@@ -41,6 +46,37 @@ export const emptyForm: FormValues = {
 };
 export type FieldErrors = Record<string, string>;
 export type CompleteEvaluation = Extract<EvaluationResult, { status: 'complete' }>;
+
+export const productOptions = [
+  {
+    id: 'mobile',
+    label: 'Phones',
+    icon: 'phone',
+    placeholder: 'iPhone 17',
+    context: 'How would you use it? What would change from what you have now?',
+  },
+  {
+    id: 'computer',
+    label: 'Computers',
+    icon: 'computer',
+    placeholder: 'MacBook Air',
+    context: 'What work, study or personal use would it help with? What is missing today?',
+  },
+  {
+    id: 'gaming',
+    label: 'Gaming & consoles',
+    icon: 'gaming',
+    placeholder: 'Nintendo Switch 2',
+    context: 'What would you like to play or enjoy? How would it fit into your free time?',
+  },
+  {
+    id: 'other_tech',
+    label: 'Other tech',
+    icon: 'other',
+    placeholder: 'Headphones…',
+    context: 'What would you use it for? What would it add to your everyday life?',
+  },
+] as const;
 
 export const money = (cents: number) =>
   new Intl.NumberFormat('en-IE', { style: 'currency', currency: 'EUR' }).format(cents / 100);
@@ -80,7 +116,9 @@ function issues(error: z.ZodError, prefix = ''): FieldErrors {
 }
 
 export function validatePurchase(form: FormValues): FieldErrors {
-  const parsed = purchaseSchema.safeParse({
+  const parsed = purchaseV11Schema.safeParse({
+    category: form.category,
+    productName: form.productName,
     amountCents: euroCents(form.price),
     motive: form.motive,
     context: form.context,
@@ -95,7 +133,13 @@ export function evaluationFromForm(
   const income = euroCents(form.income);
   const essentials = euroCents(form.essentials);
   const parsed = evaluationInputSchema(context.simulationStartDate).safeParse({
-    purchase: { amountCents: euroCents(form.price), motive: form.motive, context: form.context },
+    purchase: {
+      category: form.category,
+      productName: form.productName,
+      amountCents: euroCents(form.price),
+      motive: form.motive,
+      context: form.context,
+    },
     accountIds: form.accountIds,
     budget:
       form.useDemo && context.demoBudget

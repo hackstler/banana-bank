@@ -47,10 +47,26 @@ const context: SpendLabContext = {
     mayBeTruncated: false,
   },
   demoBudget: resolveBudget('lucia', null, '2026-10-09'),
+  budgetEvidence: {
+    source: 'bank',
+    status: 'available',
+    groups: [],
+    coverage: {
+      source: 'bank',
+      status: 'available',
+      count: 0,
+      limit: 100,
+      from: null,
+      to: null,
+      mayBeTruncated: false,
+    },
+  },
 };
 function manual(): FormValues {
   return {
     ...emptyForm,
+    category: 'mobile',
+    productName: 'The phone I chose',
     price: '1000',
     motive: 'treat',
     accountIds: ['current'],
@@ -86,7 +102,8 @@ function evaluation(form = manual()): CompleteEvaluation {
     calculationInput,
     calculation: calculateScenarios(calculationInput),
     assessment: { status: 'unavailable', reason: 'missing_key' },
-    methodology: { version: 'test', assumptions: [], sources: [] },
+    evidence: [],
+    methodology: { version: 'test', principles: [], assumptions: [], sources: [] },
   };
 }
 
@@ -192,4 +209,27 @@ test('SpendLab invalid preview hides dependent calculations and disabled sale ne
   assert.ok(disabledSale.calculation);
   assert.equal(disabledSale.calculation.scenarios[1].available, false);
   assert.equal(result.calculation.scenarios[1].available, true);
+});
+
+test('SpendLab V1.1 form requires product and category and preserves finances across contextual edits', () => {
+  const result = evaluation();
+  assert.equal(emptyForm.category, '');
+  assert.equal(emptyForm.productName, '');
+  assert.equal(emptyForm.useDemo, false);
+  assert.equal(emptyForm.income, '');
+  assert.ok(validatePurchase({ ...manual(), productName: '   ' })['purchase.productName']);
+  assert.ok(validatePurchase({ ...manual(), category: '' })['purchase.category']);
+  const revised = {
+    ...manual(),
+    category: 'computer' as const,
+    productName: 'Laptop for my work',
+    motive: 'work_study' as const,
+    context: 'My current machine stops during video calls.',
+  };
+  const parsed = evaluationFromForm(revised, context);
+  assert.ok(parsed.success);
+  assert.equal(parsed.input.purchase.productName, 'Laptop for my work');
+  assert.equal(parsed.input.purchase.category, 'computer');
+  assert.deepEqual(previewFromForm(revised, result).calculation, result.calculation);
+  assert.equal(result.input.purchase.category, 'mobile');
 });

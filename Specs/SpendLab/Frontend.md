@@ -2,9 +2,9 @@
 
 SpendLab presenta la compra de un móvil, su efecto sobre el presupuesto y una reflexión personalizada. El recorrido conserva la estética de Banana Bank y utiliza los contratos de [Backend](Backend.md) y el alcance de [Plan](Plan.md).
 
-V1 describe la interfaz actual. V1.1 amplía categorías, producto y revisión del presupuesto sin sustituir el recorrido existente. Es una propuesta pendiente de validación; este documento no implica que esos cambios o un historial estén implementados.
+V1 describe la interfaz original guardada en `d87a68e`. V1.1 amplía categorías, producto y revisión del presupuesto sin sustituir el recorrido existente. Esa extensión está implementada, pendiente de revisión visual del usuario y commit. El historial sigue sin implementarse. El recorrido y los checks están en [HowToDemo](../../docs/demo/HowToDemo.md).
 
-## V1 · Interfaz actual
+## V1 · Interfaz original
 
 ### Integración pequeña
 
@@ -85,7 +85,7 @@ Recorridos para HowToDemo: Lucía con presupuesto de demo, otro cliente manual, 
 
 En el cierre se comprueban Overview, Assistant, Transfers, Documents y selector de persona, junto a typecheck, tests y build. No se añaden dependencias de navegador o tests que solo repliquen CSS. La validación visual se hace en la aplicación habitual con el usuario y se registra como realizada u omitida.
 
-## V1.1 · Evolución visual propuesta, pendiente de implementación
+## V1.1 · Evolución implementada, pendiente de revisión visual
 
 ### Mismo recorrido, compra concreta
 
@@ -121,9 +121,9 @@ Si no hay histórico, aparece `No observed activity available` y los campos manu
 
 La venta opcional pasa a `Sell a device you already own first`. Precio y fecha siguen declarados, sin estimación de mercado ni necesidad de identificar otro producto. Puede financiar la compra vendiendo cualquier dispositivo propio; no se asume reemplazo. Sin venta, `Sell first` permanece no disponible. El backend conserva exactamente su cálculo actual.
 
-Gráfica, horizonte de 90 días, escala común, mínimos intradía, colchón, tarjetas y controles mantienen el comportamiento V1. `Buy now`, `Sell first` y `Wait` comparan el mismo producto/precio declarado. El baseline significa no realizar esta compra; no implica que ya se tenga un equivalente. No se añaden curvas por categoría ni un comparador de modelos o financiación.
+El cierre de V1.1 sustituye la gráfica por una línea temporal sencilla, conservando horizonte, mínimos intradía, colchón, tarjetas y controles. `Buy now`, `Sell first` y `Wait` comparan el mismo producto/precio declarado. El baseline significa no realizar esta compra; no implica que ya se tenga un equivalente. No hay comparador de modelos o financiación.
 
-En el resultado se muestra categoría y producto evaluados. `Edit budget & reason` permite regresar al formulario y corregir también producto/categoría. Cualquier cambio de producto, categoría, motivo o contexto retira la interpretación anterior; las cifras solo cambian si cambia un input financiero. Se mantiene `Preview — update analysis`. Actualizar envía todos los datos y sustituye contexto, cifras e interpretación juntos.
+En el resultado se muestra categoría y producto evaluados. `Edit purchase & budget` regresa al primer bloque y permite corregir también producto/categoría antes de revisar presupuesto. Cualquier cambio de producto, categoría, motivo o contexto retira la interpretación anterior; las cifras solo cambian si cambia un input financiero. Se mantiene `Preview — update analysis`. Actualizar envía todos los datos y sustituye contexto, cifras e interpretación juntos.
 
 La tarjeta editorial conserva su estructura:
 
@@ -134,13 +134,21 @@ La tarjeta editorial conserva su estructura:
 
 El texto debe distinguir un ordenador que se necesita para un problema laboral declarado de un móvil deseado por disfrute, sin inventar prestaciones ni penalizar caprichos. Gaming puede tener utilidad de ocio expresada por el usuario; el análisis no exige rentabilidad financiera. Las ideas de reparar o elegir algo más económico no se muestran como escenarios calculados. El fallback de IA conserva cálculos y reintento, sin simular un consejo personalizado.
 
+El cierre de V1.1 conserva `baseline` como selección cuando lo recomienda la IA: se muestran sus consecuencias y el botón secundario `Without this purchase`, sin seleccionar `Buy now` ni añadir otra tarjeta. El panel de colchón/reventa se alinea al inicio de su fila para evitar estirarse hasta la altura del presupuesto. Las ayudas de los campos explican importes, próximas fechas, colchón y venta; las previsiones no son datos verificados del banco. Esenciales se agrupan en una fecha y opcionales se reparten por día.
+
+Cada tradeoff incorpora un `Why?` desplegable con sus IDs reales y cifras aplicables, sin ratios en meses, nulos o fuentes duplicadas. Un cero en euros relevante sí se conserva. La lectura del motivo muestra las declaraciones originales; la recomendación ofrece precio/desembolso, colchón, mínimo pertinente y riesgo si existe, en lugar de todos los campos internos. Estas cifras se diferencian de citas explícitas del modelo. No se realizan peticiones adicionales. Editar sigue retirando el análisis anterior y sus evidencias.
+
+Antes de las tarjetas, una conclusión determinista explica comprar hoy, cuándo se cruza el límite y qué alternativas encajan. Las tarjetas separan fecha de compra y fecha real del primer mínimo del horizonte. La línea temporal del escenario seleccionado muestra solo compra, primer problema del presupuesto, primer problema aplicable desde la compra cuando difiere y saldo mínimo. Un mismo evento se agrupa; no hay curvas, ejes, cursor, lista diaria o información de otra opción superpuesta. El evento causante sigue siendo una hipótesis, sin recibos inventados. Las alternativas compatibles pueden seleccionarse desde tarjetas o accesos breves, sin repetir sus cifras.
+
+Sin riesgo no se dibuja una línea temporal: una conclusión breve basta; para `Buy now` seguro ya está sobre las tarjetas y no se repite. Si una compra aplazada respeta colchón desde la compra pero existe un problema anterior, se muestra ese problema y la compatibilidad se explica con su alcance temporal. Se distinguen problemas preexistentes de una compra que los agrava comparando datos ya calculados. Se mantienen mínimos intradía, incluso con cierre positivo, y la preview.
+
 ### Estados y verificación de V1.1
 
 Se conservan carga de contexto, errores por campo, bloqueo durante POST, AbortController, revisión de solicitud, identidad y desmontaje al cambiar persona o pestaña. Un producto nuevo no recupera texto antiguo mientras llega el análisis. El contexto del ejemplo no aparece en otra persona. No se añaden estados de guardado o lista de decisiones en el alcance propuesto.
 
-La implementación afectará a `SpendLab.tsx`, `form.ts`, estilos/textos propios y el contrato compartido. `ScenarioChart.tsx` solo necesita textos neutrales si los hubiera; se conserva la gráfica. `app/page.tsx` mantiene la integración existente y el core no cambia.
+La implementación afecta a `SpendLab.tsx`, `form.ts`, estilos/textos propios y el contrato compartido. `BankActivity.tsx` presenta evidencia en presupuesto y `Data and assumptions`; `EvidenceDetails.tsx` resuelve las citas. `ScenarioCards.tsx`, `ScenarioTimeline.tsx` y los helpers de `presentation.ts` presentan las consecuencias. `ScenarioChart.tsx` y su CSS sin uso se eliminan. Se conserva el control propio de fecha de venta. `app/page.tsx` mantiene la integración existente y el core no cambia.
 
-HowToDemo deberá cubrir las cuatro categorías, todos los clientes sin demo obligatoria, histórico limitado/ausente, ejemplo explícito de Lucía, modificación de producto sin alterar cifras y retirada de análisis obsoleto, dos utilidades/motivos distintos, fallback y cambios de persona/pestaña durante POST. Revisar móvil, teclado y las pestañas actuales. Se actualiza cuando se implemente; esta revisión solo edita las tres especificaciones.
+HowToDemo cubre las cuatro categorías, todos los clientes sin demo obligatoria, histórico limitado/ausente, ejemplo explícito de Lucía, modificación de producto sin alterar cifras y retirada de análisis obsoleto, utilidades/motivos distintos y fallback. Móvil, teclado, pestañas actuales y cambios de persona/pestaña durante POST quedan para la revisión visual del usuario; no se afirma haber automatizado esos recorridos.
 
 ### Historial · Diseño posible, pendiente de decisión
 

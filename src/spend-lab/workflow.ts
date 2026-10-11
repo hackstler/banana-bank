@@ -100,10 +100,13 @@ export async function handleSpendLabRequest(
       resale: input.resale,
     };
     const calculation = calculateScenarios(calculationInput);
-    const assessment = await interpretPurchase(
-      buildInterpretationInput(calculationInput, calculation, context, input.accountIds),
-      deps.callModel,
+    const interpretationInput = buildInterpretationInput(
+      calculationInput,
+      calculation,
+      context,
+      input.accountIds,
     );
+    const assessment = await interpretPurchase(interpretationInput, deps.callModel);
     traceLog('spend-lab', 'run.completed', {
       runId,
       userId,
@@ -131,6 +134,7 @@ export async function handleSpendLabRequest(
       calculationInput,
       calculation,
       assessment,
+      evidence: interpretationInput.evidence,
       methodology,
     };
     return json(result);
