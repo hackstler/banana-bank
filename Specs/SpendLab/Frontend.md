@@ -1,163 +1,163 @@
-# Frontend de SpendLab
+# SpendLab frontend
 
-SpendLab presenta la compra de un móvil, su efecto sobre el presupuesto y una reflexión personalizada. El recorrido conserva la estética de Banana Bank y utiliza los contratos de [Backend](Backend.md) y el alcance de [Plan](Plan.md).
+SpendLab presents a phone purchase, its effect on the budget and a personalised reflection. The flow preserves Banana Bank's visual style and uses the contracts in [Backend](Backend.md) and the scope in [Plan](Plan.md).
 
-V1 describe la interfaz original guardada en `d87a68e`. V1.1 amplía categorías, producto y revisión del presupuesto sin sustituir el recorrido existente. Esa extensión está implementada, pendiente de revisión visual del usuario y commit. El historial sigue sin implementarse. El recorrido y los checks están en [HowToDemo](../../docs/demo/HowToDemo.md).
+V1 describes the original interface saved in `d87a68e`. V1.1 expands categories, product and budget review without replacing the existing flow. That extension is implemented, awaiting the user's visual review and a commit. History remains unimplemented. The walkthrough and checks are in [HowToDemo](../../docs/demo/HowToDemo.md).
 
-## V1 · Interfaz original
+## V1 · Original interface
 
-### Integración pequeña
+### Small integration
 
-Añadir `Spend Lab` al menú de cliente después de Assistant, con un icono SVG del sistema actual. `app/page.tsx` monta la sección; los componentes propios mantienen formulario, contexto, gráfica y análisis dentro de `app/components/spend-lab/`. No se cambian las otras pestañas, la navegación de operadores ni los flujos de chat o transferencias.
+Add `Spend Lab` to the customer menu after Assistant, with an SVG icon from the existing system. `app/page.tsx` mounts the section; dedicated components keep form, context, chart and analysis in `app/components/spend-lab/`. Do not change other tabs, operator navigation or chat and transfer flows.
 
-Usar colores, tipografía, tarjetas, botones y focos existentes. Clases CSS con prefijo `spend-lab-`, sin redefinir reglas globales. Mantener inglés y EUR; no añadir librerías de gráficos o UI. La gráfica se construye con SVG y el cálculo puro compartido.
+Use existing colours, typography, cards, buttons and focus styles. Prefix CSS classes with `spend-lab-`, without redefining global rules. Keep English and EUR; do not add chart or UI libraries. Build the chart with SVG and the shared pure calculation.
 
-El estado pertenece a la sección, sin reutilizar `busy`, `pendingChat` o errores del chat. Salir de la pestaña o cambiar de persona desmonta y descarta la evaluación local. No hay persistencia, historial de decisiones ni localStorage.
+State belongs to the section, without reusing chat `busy`, `pendingChat` or errors. Leaving the tab or switching person unmounts it and discards the local evaluation. No persistence, decision history or localStorage.
 
-### Formulario y presupuesto
+### Form and budget
 
-Encabezado `Spend Lab`, subtítulo `Think through your next phone`. La compra es un móvil: no hay selector de categorías, marcas o fecha de compra. El producto muestra hoy desde `simulationStartDate` del servidor; no hereda la fecha fija del Overview o del sistema documental.
+Heading `Spend Lab`, subtitle `Think through your next phone`. The purchase is a phone: no category, brand or purchase-date selector. The product shows today from the server's `simulationStartDate`; it does not inherit the fixed date from Overview or the documentation system.
 
-El primer bloque tiene:
+The first block contains:
 
-| Campo                  | Control                                                                                       |
-| ---------------------- | --------------------------------------------------------------------------------------------- |
-| Precio del nuevo móvil | Importe obligatorio en euros, con dos decimales. Conversión de texto decimal a céntimos.      |
-| Motivo                 | Selección única: Replace something broken, Work or study, Upgrade, Just for enjoyment.        |
-| Contexto               | Texto opcional: qué móvil tiene, qué le falta y qué espera del nuevo. Máximo 1000 caracteres. |
+| Field           | Control                                                                                                 |
+| --------------- | ------------------------------------------------------------------------------------------------------- |
+| New phone price | Required amount in euros, with two decimal places. Convert decimal text to cents.                       |
+| Motive          | Single selection: Replace something broken, Work or study, Upgrade, Just for enjoyment.                 |
+| Context         | Optional text: existing phone, what it lacks and expectations for the new one. Maximum 1000 characters. |
 
-Motivo sin preselección. El contexto es una ayuda breve para personalizar el análisis, no una conversación. No exigir modelo anterior, antigüedad, precio original o especificaciones técnicas.
+Do not preselect a motive. Context is a short aid to personalise analysis, not a conversation. Do not require previous model, age, original price or technical specifications.
 
-La carga de contexto empieza al entrar. Tras `Continue`, un segundo bloque compacto muestra cuentas, presupuesto y colchón:
+Context loads on entry. After `Continue`, a second compact block shows accounts, budget and reserve:
 
-- Cuentas propias y saldo actual como checkboxes; selección explícita de al menos una y total visible. Ahorros solo cuentan al seleccionarlos.
-- Para Lucía, cinco campos de presupuesto precargados con badge `Demo budget`. Para el resto, los mismos campos vacíos para completar manualmente.
-- Ingreso mensual, esenciales, discrecionales y próximas fechas de cobro y pago esencial. Se muestran como previsiones; gastos esenciales son un agregado mensual, no un listado de recibos.
-- Colchón editable con sugerencia visible de tres meses de esenciales y explicación corta. Usar el valor aceptado, incluido cero explícito. Cambiar presupuesto no sustituye silenciosamente un colchón que el usuario ya eligió.
-- Venta opcional del móvil anterior: importe esperado y fecha de cobro, sin valores inventados. Sin venta declarada se envía `resale: null` y `Sell first` no está disponible. Si se activa esta opción, ambos campos son obligatorios antes de evaluar.
+- Owned accounts and current balance as checkboxes; explicit selection of at least one account and a visible total. Savings count only when selected.
+- For Lucía, five preloaded budget fields with a `Demo budget` badge. For everyone else, the same fields start empty for manual completion.
+- Monthly income, essential expenses, discretionary expenses and next receipt and essential payment dates. Present them as forecasts; essentials are a monthly aggregate, not a bill list.
+- Editable reserve with a visible suggestion of three months of essentials and a short explanation. Use the accepted value, including explicit zero. Budget changes do not silently replace a reserve the user has already chosen.
+- Optional resale of the previous phone: expected amount and receipt date, without invented values. Without declared resale, send `resale: null` and make `Sell first` unavailable. When enabled, both fields are required before evaluation.
 
-Editar el presupuesto de Lucía lo identifica como `Your budget assumptions` para esa evaluación. El resto de clientes también usa ese origen; no se muestran como datos bancarios. Se permite ingreso cero sin pedir fecha de cobro, y esenciales cero sin pedir fecha de pago. No hay editores de gastos individuales, gastos extra, histórico ficticio ni paneles de configuración secundarios.
+Editing Lucía's budget identifies it as `Your budget assumptions` for that evaluation. Other customers also use that source; do not present these values as bank data. Allow zero income without requiring a receipt date, and zero essentials without requiring a payment date. No individual-expense editors, extra expenses, fictional history or secondary configuration panels.
 
-El presupuesto puede incluir cuotas u otros compromisos existentes dentro de esenciales; no se promete detectar toda la situación financiera del cliente. Una ayuda pide incorporar los gastos conocidos pendientes para que las hipótesis tengan sentido.
+The budget may include existing repayments or other commitments under essentials; do not promise to detect the customer's entire financial situation. Help text asks users to include known upcoming expenses so assumptions are meaningful.
 
-`Evaluate purchase` valida y envía el input. La evaluación usa hoy; la fecha introducida para reventa o presupuesto no cambia la fecha de inicio. Los rangos de fechas se toman del servidor. Si cambia el día durante el recorrido, se actualiza contexto o se muestra el error por fecha para corregirla, sin reutilizar una fecha de inicio antigua.
+`Evaluate purchase` validates and sends input. Evaluation uses today; the resale or budget date entered does not change the start date. Date ranges come from the server. If the day changes during the flow, refresh context or show the date error for correction rather than reusing an old start date.
 
-### Gráfica y tres alternativas
+### Chart and three alternatives
 
-El resultado reúne una gráfica amplia y tres tarjetas: `Buy now`, `Sell first` y `Wait`. El baseline sin comprar puede mostrarse como línea neutra de referencia, sin una cuarta tarjeta o recorrido. No hay comparación adicional de comprar y vender después.
+The result combines a large chart and three cards: `Buy now`, `Sell first` and `Wait`. The no-purchase baseline may appear as a neutral reference line, without a fourth card or flow. No additional comparison for buying then selling later.
 
-La gráfica utiliza el mismo horizonte de 90 días y escala para todos los escenarios, muestra la línea del colchón y curvas escalonadas de saldo. Se representan los eventos y mínimos intradía; no se suavizan caídas que pueden producir falta de liquidez. Las tarjetas muestran fecha efectiva, mínimo, colchón y dependencia de hipótesis.
+The chart uses the same 90-day horizon and scale for all scenarios, showing the reserve line and stepped balance curves. Represent events and intraday minima; do not smooth drops that may cause a liquidity shortfall. Cards show effective date, minimum, reserve and dependence on assumptions.
 
-`Buy now` paga hoy sin contar con reventa. `Sell first` cobra el importe previsto y compra después; su tarjeta indica esa condición. `Wait` muestra la primera fecha compatible calculada o que no existe una dentro del horizonte. Los problemas preexistentes se distinguen del impacto añadido por la compra.
+`Buy now` pays today without counting resale. `Sell first` receives the expected amount and then buys; its card states that condition. `Wait` shows the first calculated compatible date or that none exists within the horizon. Distinguish preexisting problems from the impact added by the purchase.
 
-Los controles de precio, colchón, importe de venta y fecha de cobro permiten explorar la gráfica. La fecha de venta se puede mover con un control de días de 0 a 60 desde hoy y un campo de fecha equivalente. No se añaden controles para otras compras o nuevos compromisos.
+Controls for price, reserve, resale amount and receipt date allow exploring the chart. Move the resale date with a day control from 0 to 60 from today and an equivalent date field. Do not add controls for other purchases or new commitments.
 
-La preview usa el último contexto validado y el motor compartido, sin llamada al modelo por cada cambio. Al editar, se retira el análisis personalizado anterior y se muestra `Preview — update analysis`. `Update analysis` vuelve a enviar la evaluación completa; el servidor refresca saldo y fecha y sustituye contexto, cifras e interpretación juntos. Inputs incompletos muestran su error, sin conservar cifras que dependan de un dato antiguo.
+Preview uses the last validated context and shared engine, without calling the model for every change. Editing removes the previous personalised analysis and shows `Preview — update analysis`. `Update analysis` resends the complete evaluation; the server refreshes balance and date and replaces context, figures and interpretation together. Incomplete inputs show errors rather than retaining figures dependent on an old value.
 
-### Análisis que ayuda a decidir
+### Analysis that helps users decide
 
-El análisis se presenta como una tarjeta editorial breve, junto a la comparación, con estos contenidos:
+Present analysis as a short editorial card alongside comparison, containing:
 
-1. **Qué buscas conseguir:** lectura del motivo y contexto, distinguiendo una necesidad descrita de un gusto o una mejora deseada.
-2. **Qué sacrificas:** uno o dos tradeoffs concretos ligados al margen mensual, colchón, espera o dependencia de vender.
-3. **Qué alternativa encaja:** recomendación con razones, condicionada al presupuesto y al valor personal expresado.
-4. **Una reflexión útil:** una pregunta específica del caso, visible sin abrir un chat.
+1. **What you want to achieve:** interpretation of motive and context, distinguishing a described need from enjoyment or a desired improvement.
+2. **What you give up:** one or two concrete tradeoffs tied to monthly room, reserve, waiting or dependence on selling.
+3. **Which alternative fits:** recommendation with reasons, conditional on budget and expressed personal value.
+4. **A useful reflection:** a case-specific question, visible without opening a chat.
 
-La reflexión no necesita respuesta para terminar el recorrido. El cliente puede ajustar el contexto y volver a evaluar si quiere explorarla. No se implementa un diálogo de preguntas sucesivas.
+The reflection does not require an answer to complete the flow. Customers may adjust context and evaluate again if they want to explore it. Do not implement a dialogue of successive questions.
 
-Un deseo asumible no se condena por ser un capricho. Una necesidad laboral no autoriza inventar mayor productividad o ingresos. La capa personal debe cambiar al cambiar motivo/contexto, aunque la gráfica permanezca idéntica. Las cifras y la clasificación siguen siendo del motor.
+An affordable wish is not condemned as a treat. A work need does not authorise invented productivity or income gains. Personal interpretation must change when motive/context changes, even if the chart remains identical. Figures and classification still come from the engine.
 
-`Data and assumptions` permite ver saldo y hora de consulta, origen del presupuesto, actividad bancaria disponible y fuentes metodológicas. No requiere una biblioteca nueva. Si falta histórico se reconoce sin bloquear una evaluación que tenga saldo y presupuesto suficientes.
+`Data and assumptions` shows balance and observation time, budget source, available bank activity and methodological sources. No new library is required. Acknowledge missing history without blocking an evaluation with sufficient balance and budget.
 
-Si la IA falla, se conservan gráfica, cifras y flags con `Personal analysis unavailable`; no se muestra una pregunta genérica simulando reflexión personalizada. Se puede reintentar con el mismo formulario. No hay scores morales o promesas de compra segura.
+If AI fails, keep the chart, figures and flags with `Personal analysis unavailable`; do not show a generic question pretending to be personalised reflection. Allow retrying with the same form. No moral scores or promises of a safe purchase.
 
-### Estados y validación
+### States and validation
 
-Estados: `purchase`, `budget`, `evaluating` y `results`, con carga de contexto independiente. Durante el POST hay una evaluación activa y sus inputs quedan bloqueados; cambiar de pestaña o persona sigue permitido. No se añade un botón o subsistema de cancelación propio.
+States: `purchase`, `budget`, `evaluating` and `results`, with independent context loading. During POST, one evaluation is active and its inputs are locked; switching tab or person remains allowed. Do not add a dedicated cancellation button or subsystem.
 
-Usar AbortController y contador de solicitudes; solo aplicar respuestas si siguen vigentes componente, actor y revisión. Comprobar `userId` del resultado. Un resultado tardío no navega de vuelta ni aparece en otra persona. No hay streaming o progreso ficticio por etapas.
+Use AbortController and a request counter; apply responses only while component, actor and revision remain current. Check the result's `userId`. A late result does not navigate back or appear for another person. No streaming or fictional stage progress.
 
-`needs_input` vuelve al bloque correspondiente y enfoca cuentas, presupuesto o colchón. Los 400 tienen errores por campo; el fallo de saldo bancario permite reintentar sin sustituirlo por demo. La falta de IA tiene fallback numérico diferenciado. Los errores quedan dentro de SpendLab.
+`needs_input` returns to the relevant block and focuses accounts, budget or reserve. 400 responses contain field errors; bank balance failure allows retrying without substituting demo data. AI failure has a distinct numerical fallback. Errors stay within SpendLab.
 
-La disposición apila gráfica y tarjetas en móvil. Los controles tienen labels, foco y alternativa de teclado; los cambios de estado usan `aria-live`. Las señales combinan texto y color. La gráfica incorpora un resumen textual de fechas y mínimos para no depender del puntero o de la vista; no se desarrolla una tabla completa de eventos en v1.
+Stack chart and cards on mobile. Controls have labels, focus and keyboard alternatives; state changes use `aria-live`. Signals combine text and colour. The chart includes a textual summary of dates and minima so it does not depend on a pointer or sight; do not develop a full event table in v1.
 
-Recorridos para HowToDemo: Lucía con presupuesto de demo, otro cliente manual, comparación de las tres alternativas, colchón comprometido, preview sin análisis viejo y dos motivos con las mismas cifras que produzcan análisis personales distintos. Añadir cambio de persona/pestaña durante una petición, errores de datos/banco/modelo y revisión en móvil y teclado.
+HowToDemo walkthroughs: Lucía with demo budget, another customer with manual budget, comparison of three alternatives, compromised reserve, preview without stale analysis and two motives with identical figures producing distinct personal analyses. Include person/tab switching during a request, data/bank/model errors and mobile and keyboard review.
 
-En el cierre se comprueban Overview, Assistant, Transfers, Documents y selector de persona, junto a typecheck, tests y build. No se añaden dependencias de navegador o tests que solo repliquen CSS. La validación visual se hace en la aplicación habitual con el usuario y se registra como realizada u omitida.
+Closure checks Overview, Assistant, Transfers, Documents and the person selector, together with typecheck, tests and build. Do not add browser dependencies or tests that only replicate CSS. Visual validation takes place in the usual application with the user and is recorded as completed or omitted.
 
-## V1.1 · Evolución implementada, pendiente de revisión visual
+## V1.1 · Implemented evolution, awaiting visual review
 
-### Mismo recorrido, compra concreta
+### Same flow, specific purchase
 
-Se conserva `Spend Lab` en el menú y los tres bloques: compra → presupuesto → resultado. El subtítulo pasa a `Think through your next tech purchase`. No se añade chat, otra sección por categoría, buscador o catálogo. Se reutilizan componentes, colores, tipografía, estilos con prefijo, gráfica SVG y estado local.
+Keep `Spend Lab` in the menu and the three blocks: purchase → budget → result. Change the subtitle to `Think through your next tech purchase`. Do not add a chat, category-specific sections, search or catalogue. Reuse components, colours, typography, prefixed styles, SVG chart and local state.
 
-El primer bloque amplía el formulario:
+The first block extends the form:
 
-| Campo     | Control V1.1                                                                                                                                                                                                             |
-| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Categoría | Cuatro opciones visuales de selección única: `Phones`, `Computers`, `Gaming & consoles`, `Other tech`. Sin preselección silenciosa.                                                                                      |
-| Producto  | Campo obligatorio `What would you like to buy?`, de 1 a 160 caracteres. Placeholder según categoría: `iPhone 17`, `MacBook Air`, `Nintendo Switch 2`, `Headphones…`. Son ejemplos de texto, no catálogo o recomendación. |
-| Precio    | El mismo control en EUR, ahora `Purchase price`; sigue siendo el precio que aporta la persona.                                                                                                                           |
-| Motivo    | Los cuatro motivos actuales, sin preselección.                                                                                                                                                                           |
-| Contexto  | Opcional, máximo 1000 caracteres. Ayuda contextual: uso esperado, qué falta, qué se tiene ya o urgencia. Sin exigir una ficha técnica.                                                                                   |
+| Field    | V1.1 control                                                                                                                                                                                                                  |
+| -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Category | Four visual single-selection options: `Phones`, `Computers`, `Gaming & consoles`, `Other tech`. No silent preselection.                                                                                                       |
+| Product  | Required `What would you like to buy?` field, 1 to 160 characters. Category-specific placeholder: `iPhone 17`, `MacBook Air`, `Nintendo Switch 2`, `Headphones…`. These are text examples, not a catalogue or recommendation. |
+| Price    | Same EUR control, now `Purchase price`; still the price supplied by the person.                                                                                                                                               |
+| Motive   | The four existing motives, without preselection.                                                                                                                                                                              |
+| Context  | Optional, maximum 1000 characters. Contextual help: expected use, what is missing, what is already owned or urgency. No requirement for a technical specification sheet.                                                      |
 
-El nombre no necesita marca/modelo comercial: una descripción concreta también sirve. No se consulta o autocompleta especificaciones, precio o disponibilidad. Cambiar categoría conserva el texto ya escrito y los otros datos, permite corregirlos y no calcula un precio distinto. La coincidencia entre categoría y producto no requiere un clasificador de IA; los límites de input se validan con el contrato compartido.
+The name need not be a commercial brand/model: a concrete description also works. Do not look up or autocomplete specifications, price or availability. Changing category preserves entered text and other data, allows corrections and does not calculate a different price. Matching category and product does not require an AI classifier; input limits are validated with the shared contract.
 
-La ilustración y textos que hoy hablan de un teléfono se adaptan al dispositivo elegido con SVG/CSS del repositorio, sin assets generados, librerías o animaciones adicionales. Se conserva el protagonismo de las tres alternativas. Los textos de formularios y resultados dejan de presuponer que ya existe un teléfono anterior.
+Adapt illustrations and wording currently referring to a phone to the selected device using repository SVG/CSS, without generated assets, libraries or additional animations. Keep the three alternatives prominent. Form and result wording no longer assumes a previous phone exists.
 
-### Presupuesto común para todos los clientes
+### Shared budget for all customers
 
-Al entrar se consultan cuentas, saldo, actividad y evidencia agregada. Todos siguen el mismo bloque de presupuesto. Seleccionar cuentas sigue siendo explícito; no se incluyen ahorros automáticamente. Se muestra un resumen compacto de las entradas y salidas observadas por mes para las cuentas elegidas, con fechas, número de movimientos y advertencia de cobertura limitada.
+On entry, fetch accounts, balance, activity and aggregated evidence. Everyone follows the same budget block. Account selection remains explicit; do not include savings automatically. Show a compact summary of observed monthly inflows and outflows for selected accounts, with dates, transaction count and a limited-coverage warning.
 
-El resumen se sitúa junto a la ayuda del presupuesto, sin convertirlo en otro dashboard. Etiqueta `Observed bank activity`, no `Your monthly income` o `Your spending forecast`. Las cifras pueden incluir aperturas de cuenta y transferencias; no se presentan como nómina o clasificación de consumo. Un mes sin registros no se muestra como gasto cero. La actividad antigua conserva sus fechas reales, sin desplazarla al mes actual.
+Place the summary beside budget help, without turning it into another dashboard. Label it `Observed bank activity`, not `Your monthly income` or `Your spending forecast`. Figures may include account openings and transfers; do not present them as salary or consumption classification. A month without records is not shown as zero spending. Old activity keeps its actual dates rather than moving into the current month.
 
-Los cinco campos de previsión actuales siguen editables y se confirman antes de evaluar. No se rellenan automáticamente a partir de totales históricos: ingresos futuros, esenciales/discrecionales y próximas fechas necesitan declaración. La ayuda explica que deben incluirse compromisos conocidos; no se abre un editor de gastos individuales. Mantener ceros explícitos, fechas deshabilitadas cuando corresponda y colchón elegido por el usuario.
+The existing five forecast fields remain editable and are confirmed before evaluation. Do not fill them automatically from historical totals: future income, essential/discretionary expenses and upcoming dates require declarations. Help text explains that known commitments must be included; do not open an individual-expense editor. Preserve explicit zeros, disabled dates where appropriate and the user's chosen reserve.
 
-Lucía utiliza también este recorrido sin depender de su fixture. Si el contexto ofrece `demoBudget`, aparece una acción secundaria `Load Lucía’s demo budget` que carga el ejemplo completo y sus fechas futuras, claramente etiquetado. No se selecciona por defecto. Editarlo lo convierte en `Your budget assumptions`, como en V1. No se ofrece el perfil de Lucía a otros clientes. La sugerencia de tres meses de esenciales se conserva, sin sobrescribir silenciosamente el colchón al cargar o editar datos.
+Lucía also uses this flow without depending on her fixture. If context offers `demoBudget`, show a secondary action, `Load Lucía’s demo budget`, loading the complete example and its future dates, clearly labelled. It is not selected by default. Editing converts it into `Your budget assumptions`, as in V1. Do not offer Lucía's profile to other customers. Keep the suggestion of three months of essentials without silently overwriting the reserve when loading or editing data.
 
-Si no hay histórico, aparece `No observed activity available` y los campos manuales siguen disponibles. Si no hay movimientos en las cuentas elegidas, se explica ese alcance sin afirmar que no hay gastos. Si falla la consulta de saldo, se mantiene el bloqueo y reintento existentes. El resultado y `Data and assumptions` distinguen saldo/actividad bancaria, presupuesto previsto y ejemplo de demo.
+When history is missing, show `No observed activity available` and keep manual fields available. If selected accounts have no transactions, explain that scope without claiming there are no expenses. If the balance read fails, retain existing blocking and retry behaviour. Results and `Data and assumptions` distinguish bank balance/activity, forecast budget and demo example.
 
-### Venta, preview y resultado
+### Resale, preview and result
 
-La venta opcional pasa a `Sell a device you already own first`. Precio y fecha siguen declarados, sin estimación de mercado ni necesidad de identificar otro producto. Puede financiar la compra vendiendo cualquier dispositivo propio; no se asume reemplazo. Sin venta, `Sell first` permanece no disponible. El backend conserva exactamente su cálculo actual.
+Optional resale becomes `Sell a device you already own first`. Price and date remain declared, without a market estimate or a requirement to identify another product. The purchase can be funded by selling any owned device; do not assume replacement. Without resale, `Sell first` remains unavailable. The backend preserves exactly its current calculation.
 
-El cierre de V1.1 sustituye la gráfica por una línea temporal sencilla, conservando horizonte, mínimos intradía, colchón, tarjetas y controles. `Buy now`, `Sell first` y `Wait` comparan el mismo producto/precio declarado. El baseline significa no realizar esta compra; no implica que ya se tenga un equivalente. No hay comparador de modelos o financiación.
+The V1.1 closure replaces the chart with a simple timeline, retaining horizon, intraday minima, reserve, cards and controls. `Buy now`, `Sell first` and `Wait` compare the same declared product/price. Baseline means not making this purchase; it does not imply ownership of an equivalent. No model or financing comparator.
 
-En el resultado se muestra categoría y producto evaluados. `Edit purchase & budget` regresa al primer bloque y permite corregir también producto/categoría antes de revisar presupuesto. Cualquier cambio de producto, categoría, motivo o contexto retira la interpretación anterior; las cifras solo cambian si cambia un input financiero. Se mantiene `Preview — update analysis`. Actualizar envía todos los datos y sustituye contexto, cifras e interpretación juntos.
+Show evaluated category and product in the result. `Edit purchase & budget` returns to the first block, allowing product/category correction before budget review. Any change to product, category, motive or context removes the previous interpretation; figures change only when a financial input changes. Keep `Preview — update analysis`. Updating sends all data and replaces context, figures and interpretation together.
 
-La tarjeta editorial conserva su estructura:
+The editorial card retains its structure:
 
-- `What you’re looking for`: compra concreta, motivo y utilidad según lo declarado, con condiciones si faltan datos.
-- `What you give up`: sacrificio de margen/colchón o dependencia de venta/espera, con las cifras del motor.
-- Recomendación: alternativa coherente y opciones cualitativas pertinentes, sin precios inventados.
-- Pregunta: reflexión específica sobre uso, urgencia o prioridad, sin necesidad de responder en un chat.
+- `What you’re looking for`: specific purchase, motive and usefulness according to declarations, with conditions if data is missing.
+- `What you give up`: sacrificed room/reserve or dependence on resale/waiting, using engine figures.
+- Recommendation: coherent alternative and relevant qualitative options, without invented prices.
+- Question: specific reflection about use, urgency or priority, without requiring a chat response.
 
-El texto debe distinguir un ordenador que se necesita para un problema laboral declarado de un móvil deseado por disfrute, sin inventar prestaciones ni penalizar caprichos. Gaming puede tener utilidad de ocio expresada por el usuario; el análisis no exige rentabilidad financiera. Las ideas de reparar o elegir algo más económico no se muestran como escenarios calculados. El fallback de IA conserva cálculos y reintento, sin simular un consejo personalizado.
+Text must distinguish a computer needed for a declared work problem from a phone wanted for enjoyment, without inventing features or penalising treats. Gaming may have recreational value expressed by the user; analysis does not require financial returns. Repairing or choosing a cheaper option are not shown as calculated scenarios. AI fallback retains calculations and retry without simulating personalised advice.
 
-El cierre de V1.1 conserva `baseline` como selección cuando lo recomienda la IA: se muestran sus consecuencias y el botón secundario `Without this purchase`, sin seleccionar `Buy now` ni añadir otra tarjeta. El panel de colchón/reventa se alinea al inicio de su fila para evitar estirarse hasta la altura del presupuesto. Las ayudas de los campos explican importes, próximas fechas, colchón y venta; las previsiones no son datos verificados del banco. Esenciales se agrupan en una fecha y opcionales se reparten por día.
+V1.1 closure preserves `baseline` selection when AI recommends it: show its consequences and the secondary `Without this purchase` button, without selecting `Buy now` or adding another card. Align the reserve/resale panel to the top of its row to avoid stretching it to the budget's height. Field help explains amounts, upcoming dates, reserve and resale; forecasts are not bank-verified data. Aggregate essentials on one date and spread discretionary expenses by day.
 
-Cada tradeoff incorpora un `Why?` desplegable con sus IDs reales y cifras aplicables, sin ratios en meses, nulos o fuentes duplicadas. Un cero en euros relevante sí se conserva. La lectura del motivo muestra las declaraciones originales; la recomendación ofrece precio/desembolso, colchón, mínimo pertinente y riesgo si existe, en lugar de todos los campos internos. Estas cifras se diferencian de citas explícitas del modelo. No se realizan peticiones adicionales. Editar sigue retirando el análisis anterior y sus evidencias.
+Each tradeoff includes an expandable `Why?` with its actual IDs and applicable figures, without ratios in months, nulls or duplicated sources. Keep a relevant zero in euros. Motive interpretation shows original declarations; recommendation offers price/outlay, reserve, relevant minimum and risk if present, rather than every internal field. Distinguish these figures from explicit model citations. No additional requests. Editing still removes previous analysis and its evidence.
 
-Antes de las tarjetas, una conclusión determinista explica comprar hoy, cuándo se cruza el límite y qué alternativas encajan. Las tarjetas separan fecha de compra y fecha real del primer mínimo del horizonte. La línea temporal del escenario seleccionado muestra solo compra, primer problema del presupuesto, primer problema aplicable desde la compra cuando difiere y saldo mínimo. Un mismo evento se agrupa; no hay curvas, ejes, cursor, lista diaria o información de otra opción superpuesta. El evento causante sigue siendo una hipótesis, sin recibos inventados. Las alternativas compatibles pueden seleccionarse desde tarjetas o accesos breves, sin repetir sus cifras.
+Before the cards, a deterministic conclusion explains buying today, when a limit is crossed and which alternatives fit. Cards separate purchase date from the actual date of the first horizon minimum. The selected scenario's timeline shows only purchase, first budget problem, first applicable problem from purchase onward when different, and minimum balance. Group the same event; no curves, axes, cursor, daily list or overlaid information from another option. The causal event remains an assumption, without invented bills. Compatible alternatives can be selected from cards or short links without repeating their figures.
 
-Sin riesgo no se dibuja una línea temporal: una conclusión breve basta; para `Buy now` seguro ya está sobre las tarjetas y no se repite. Si una compra aplazada respeta colchón desde la compra pero existe un problema anterior, se muestra ese problema y la compatibilidad se explica con su alcance temporal. Se distinguen problemas preexistentes de una compra que los agrava comparando datos ya calculados. Se mantienen mínimos intradía, incluso con cierre positivo, y la preview.
+Do not draw a timeline when there is no risk: a brief conclusion is enough; for safe `Buy now`, it already appears above the cards and is not repeated. If a deferred purchase respects the reserve from purchase onward but an earlier problem exists, show that problem and explain the temporal scope of compatibility. Distinguish preexisting problems from purchases worsening them by comparing already-calculated data. Preserve intraday minima, even with positive closing balances, and preview.
 
-### Estados y verificación de V1.1
+### V1.1 states and verification
 
-Se conservan carga de contexto, errores por campo, bloqueo durante POST, AbortController, revisión de solicitud, identidad y desmontaje al cambiar persona o pestaña. Un producto nuevo no recupera texto antiguo mientras llega el análisis. El contexto del ejemplo no aparece en otra persona. No se añaden estados de guardado o lista de decisiones en el alcance propuesto.
+Keep context loading, field errors, locking during POST, AbortController, request revision, identity and unmounting on person or tab change. A new product does not recover old text while analysis is loading. Example context does not appear for another person. Do not add saving states or decision lists within the proposed scope.
 
-La implementación afecta a `SpendLab.tsx`, `form.ts`, estilos/textos propios y el contrato compartido. `BankActivity.tsx` presenta evidencia en presupuesto y `Data and assumptions`; `EvidenceDetails.tsx` resuelve las citas. `ScenarioCards.tsx`, `ScenarioTimeline.tsx` y los helpers de `presentation.ts` presentan las consecuencias. `ScenarioChart.tsx` y su CSS sin uso se eliminan. Se conserva el control propio de fecha de venta. `app/page.tsx` mantiene la integración existente y el core no cambia.
+Implementation affects `SpendLab.tsx`, `form.ts`, dedicated styles/text and the shared contract. `BankActivity.tsx` presents evidence in the budget and `Data and assumptions`; `EvidenceDetails.tsx` resolves citations. `ScenarioCards.tsx`, `ScenarioTimeline.tsx` and helpers in `presentation.ts` present consequences. Remove `ScenarioChart.tsx` and its unused CSS. Preserve the dedicated resale-date control. `app/page.tsx` retains existing integration and the core stays unchanged.
 
-HowToDemo cubre las cuatro categorías, todos los clientes sin demo obligatoria, histórico limitado/ausente, ejemplo explícito de Lucía, modificación de producto sin alterar cifras y retirada de análisis obsoleto, utilidades/motivos distintos y fallback. Móvil, teclado, pestañas actuales y cambios de persona/pestaña durante POST quedan para la revisión visual del usuario; no se afirma haber automatizado esos recorridos.
+HowToDemo covers the four categories, all customers without a mandatory demo, limited/missing history, Lucía's explicit example, product changes without changing figures and removal of stale analysis, distinct uses/motives and fallback. Mobile, keyboard, existing tabs and person/tab changes during POST remain for the user's visual review; do not claim those flows were automated.
 
-### Historial · Diseño posible, pendiente de decisión
+### History · Possible design, pending a decision
 
-Actualmente salir de SpendLab o cambiar de persona elimina el estado local. V1.1 mantiene ese comportamiento mientras no se apruebe persistencia. No se añade localStorage como solución intermedia.
+Currently leaving SpendLab or switching person clears local state. V1.1 keeps that behaviour unless persistence is approved. Do not add localStorage as an intermediate solution.
 
-Un historial posterior podría integrarse en SpendLab con una lista compacta de producto, fecha, precio y estado del análisis, un detalle del snapshot y la acción `Re-evaluate with current data`. No requiere reutilizar el chat ni crear otra aplicación. Ver una evaluación antigua mostraría fecha y condiciones originales, con aviso de que el saldo no es actual.
+Later history could integrate into SpendLab with a compact list of product, date, price and analysis status, snapshot detail and a `Re-evaluate with current data` action. This does not require reusing chat or creating another application. Viewing an old evaluation would show original date and conditions, with a notice that the balance is not current.
 
-Recuperar una decisión cargaría declaraciones como borrador y consultaría contexto actual. Habría que revisar cuentas que ya no estén disponibles, presupuesto, fechas pasadas y reventa; nunca presentar el resultado antiguo como una evaluación nueva. La nueva decisión tendría su propio registro y podría relacionarse con la anterior.
+Recovering a decision would load declarations as a draft and fetch current context. Review accounts no longer available, budget, past dates and resale; never present the old result as a new evaluation. The new decision would have its own record and could link to the previous one.
 
-La comparación inicial más pequeña sería una tabla entre el snapshot original y la nueva evaluación: producto/precio, fechas, saldo, presupuesto, colchón, mínimos y recomendación. Mostraría qué condiciones cambiaron y las versiones utilizadas. No requeriría un LLM comparador ni nuevas gráficas, y no atribuiría toda diferencia a cambiar de producto.
+The smallest initial comparison would be a table between the original snapshot and new evaluation: product/price, dates, balance, budget, reserve, minima and recommendation. Show which conditions changed and the versions used. No comparator LLM or new charts are required, and not every difference would be attributed to a product change.
 
-Esto añade carga/lista/detalle, selección de registro, restauración, comparación y errores de guardado, además de autorización y persistencia en Backend. Por esa complejidad se recomienda una entrega posterior V1.2. Quedan por decidir inclusión en V1.1, guardado explícito o automático, retención/borrado y comparación desde la primera entrega. Estos controles no se diseñan como funcionalidad comprometida ni se implementan hasta que el usuario cierre el alcance.
+This adds loading/list/detail, record selection, restoration, comparison and saving errors, alongside Backend authorisation and persistence. This complexity supports recommending a later V1.2 delivery. Still to decide: inclusion in V1.1, explicit or automatic saving, retention/deletion and comparison from the first delivery. These controls are not designed as committed functionality or implemented until the user settles scope.

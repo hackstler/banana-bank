@@ -1,228 +1,228 @@
-# Backend de SpendLab
+# SpendLab backend
 
-El backend ejecuta un workflow pequeño: validar, obtener contexto, comprobar presupuesto, calcular tres escenarios e interpretar la decisión con una única llamada de IA. [Plan](Plan.md) define el alcance y [Frontend](Frontend.md) consume el contrato.
+The backend runs a small workflow: validate, fetch context, check the budget, calculate three scenarios and interpret the decision with a single AI call. [Plan](Plan.md) defines the scope and [Frontend](Frontend.md) consumes the contract.
 
-La sección V1 documenta la implementación original guardada en `d87a68e`. V1.1 describe la extensión ya implementada, pendiente de revisión del usuario y commit. La persistencia se analiza aparte y no forma parte de V1.1 mientras no se decida expresamente. Los checks y la demo están en [HowToDemo](../../docs/demo/HowToDemo.md).
+The V1 section documents the original implementation saved in `d87a68e`. V1.1 describes the implemented extension, awaiting user review and a commit. Persistence is assessed separately and is not part of V1.1 unless explicitly decided. Checks and the demo are in [HowToDemo](../../docs/demo/HowToDemo.md).
 
-## V1 · Implementación original
+## V1 · Original implementation
 
-### Integración y fuentes
+### Integration and sources
 
-La lógica se mantiene en `src/spend-lab/`: esquemas y tipos compartidos, contexto, motor puro, interpretación y función de workflow. La API existente solo despacha sus dos endpoints al módulo. No se crea un framework de workflows ni una arquitectura adicional.
+Logic stays in `src/spend-lab/`: shared schemas and types, context, pure engine, interpretation and workflow function. The existing API only dispatches its two endpoints to the module. Do not create a workflow framework or an additional architecture.
 
-Se reutilizan `actor`, `sameOrigin`, `HttpError`, `bankRequest`, `openai()`, `config.chatModel` y `traceLog`. El cálculo y los schemas utilizados por la preview no importan filesystem, SQLite, SDK OpenAI ni configuración de servidor. No se modifica `simulator/`, el agente existente o las transferencias.
+Reuse `actor`, `sameOrigin`, `HttpError`, `bankRequest`, `openai()`, `config.chatModel` and `traceLog`. Calculations and schemas used by the preview do not import the filesystem, SQLite, OpenAI SDK or server configuration. Do not modify `simulator/`, the existing agent or transfers.
 
-Se distinguen tres orígenes:
+Distinguish three sources:
 
-| Origen | Uso                                                                       |
-| ------ | ------------------------------------------------------------------------- |
-| `bank` | Saldo actual de cuentas y actividad observada por HTTP.                   |
-| `demo` | Presupuesto ficticio de Lucía, identificado como hipótesis de demo.       |
-| `user` | Precio, motivo, contexto, presupuesto manual, colchón y reventa prevista. |
+| Source | Use                                                                 |
+| ------ | ------------------------------------------------------------------- |
+| `bank` | Current account balance and observed activity over HTTP.            |
+| `demo` | Lucía's fictional budget, identified as demo assumptions.           |
+| `user` | Price, motive, context, manual budget, reserve and expected resale. |
 
-`GET /v1/accounts` es imprescindible. Los IDs elegidos deben pertenecer a las cuentas devueltas para la sesión. `GET /v1/movements` aporta contexto limitado: se conserva su cobertura de hasta 100 movimientos y fechas reales, sin inferir ingresos recurrentes o un presupuesto mensual completo a partir de descripciones. Si falla solo esta lectura, se indica que no hay histórico disponible y puede continuar el análisis con saldo y presupuesto; si falla cuentas, la evaluación no continúa.
+`GET /v1/accounts` is essential. Selected IDs must belong to the accounts returned for the session. `GET /v1/movements` provides limited context: preserve its coverage of up to 100 transactions and actual dates, without inferring recurring income or a complete monthly budget from descriptions. If only this read fails, report that history is unavailable and allow analysis to continue with balance and budget; if accounts fail, evaluation cannot continue.
 
-Los movimientos no alimentan una nueva clasificación de gastos ni se suman al saldo o al presupuesto. No se crean históricos sintéticos de cinco meses. Las fechas de los movimientos se mantienen, incluso cuando sean antiguas respecto a la simulación actual.
+Transactions do not feed a new expense classification and are not added to the balance or budget. Do not create synthetic five-month histories. Keep transaction dates unchanged, even when old relative to the current simulation.
 
-### Un presupuesto de demo y entrada manual
+### One demo budget and manual input
 
-`fixtures/spend-lab/lucia.json` contiene exclusivamente el presupuesto de Lucía, versión `spend-lab-demo-v1`: ingresos mensuales de 175000 céntimos, esenciales de 90000 y discrecionales de 30000, con ingreso previsto el día 2 y pago esencial agregado el día 25. Sus próximas fechas se generan a partir de hoy, usando la siguiente ocurrencia estrictamente futura de cada día del mes. Son supuestos de demo, no nóminas garantizadas o cargos verificados.
+`fixtures/spend-lab/lucia.json` contains only Lucía's budget, version `spend-lab-demo-v1`: monthly income of 175000 cents, essential expenses of 90000 and discretionary expenses of 30000, with expected income on day 2 and the aggregated essential payment on day 25. Generate upcoming dates from today, using the next strictly future occurrence of each day of the month. These are demo assumptions, not guaranteed salary or verified charges.
 
-No se modifican seed, setup, reset o tablas. Para los demás clientes no hay presupuesto precargado: se solicita uno manual. Todos pueden corregir el presupuesto mediante los mismos cinco campos:
+Do not modify seed, setup, reset or tables. Other customers have no preloaded budget: request a manual one. Everyone can adjust the budget through the same five fields:
 
-- `monthlyIncomeCents`: ingreso mensual previsto.
-- `monthlyEssentialExpensesCents`: compromisos esenciales mensuales, incluidas cuotas existentes si el usuario las considera.
-- `monthlyDiscretionaryExpensesCents`: gasto discrecional mensual previsto.
-- `nextIncomeDate`: próxima fecha de cobro; null solo si el ingreso es cero.
-- `nextEssentialExpensesDate`: próxima fecha de pago del agregado esencial; null solo si los esenciales son cero.
+- `monthlyIncomeCents`: expected monthly income.
+- `monthlyEssentialExpensesCents`: monthly essential commitments, including existing repayments if the user includes them.
+- `monthlyDiscretionaryExpensesCents`: expected monthly discretionary spending.
+- `nextIncomeDate`: next receipt date; null only when income is zero.
+- `nextEssentialExpensesDate`: next payment date for the essential aggregate; null only when essentials are zero.
 
-El usuario confirma que el agregado incorpora sus compromisos conocidos; no se desarrolla un editor de recibos, lista de gastos extra o cálculo de préstamos. El agregado en una fecha es una simplificación visible del modelo. Los discrecionales se distribuyen por días del calendario para construir una proyección comprensible, sin afirmar que ese sea el patrón real de consumo.
+The user confirms that the aggregate includes their known commitments; do not develop a bill editor, list of extra expenses or loan calculation. Aggregating expenses on one date is a visible model simplification. Spread discretionary expenses across calendar days to produce an understandable projection, without claiming this is the actual spending pattern.
 
-El GET devuelve un `demoBudget` para Lucía y null para el resto. El POST recibe `budget: null` para utilizar el de demo o un objeto completo para utilizar el manual, que se etiqueta `user`. Editar cualquier campo de demo lo convierte en presupuesto declarado para esa evaluación, sin modificar el fixture. El saldo inicial siempre procede del banco y suma únicamente las cuentas seleccionadas.
+GET returns `demoBudget` for Lucía and null for everyone else. POST accepts `budget: null` to use the demo or a complete object to use a manual budget, labelled `user`. Editing any demo field turns it into a declared budget for that evaluation, without changing the fixture. The starting balance always comes from the bank and sums only selected accounts.
 
-### Fecha actual y cálculo reproducible
+### Current date and reproducible calculation
 
-Cada petición captura una sola vez el reloj real mediante una dependencia `now(): Date`. El valor por defecto es el reloj del servidor; los tests inyectan una fecha fija. `simulationStartDate` es la fecha UTC actual `YYYY-MM-DD`; no se importa ni se utiliza `referenceDate` documental para iniciar compras.
+Each request captures the actual clock once through a `now(): Date` dependency. The default is the server clock; tests inject a fixed date. `simulationStartDate` is the current UTC date, `YYYY-MM-DD`; do not import or use the documentation's `referenceDate` to start purchases.
 
-El horizonte comprende el día inicial y los 90 días siguientes. Reventa y fechas iniciales de presupuesto se validan respecto a esa fecha: la venta entre hoy y el día 60; las próximas fechas mensuales entre hoy y los 31 días siguientes. Compra ahora siempre significa el día inicial; no se añade un selector de fecha de compra.
+The horizon includes the starting day and the following 90 days. Validate resale and initial budget dates relative to that date: resale between today and day 60; upcoming monthly dates between today and the next 31 days. Buy now always means the starting day; do not add a purchase-date selector.
 
-Las recurrencias conservan el día del mes de su primera fecha declarada y se ajustan al último día de meses cortos. La primera fecha declarada es un evento todavía pendiente, incluso si es hoy; el usuario debe indicar el próximo pago/cobro, no uno ya reflejado en el saldo. No se generan eventos de fechas anteriores al inicio.
+Recurrences retain the day of the month from their first declared date and clamp to the last day of shorter months. The first declared date represents an event still pending, even if today; the user must specify the next payment/receipt, not one already reflected in the balance. Do not generate events before the start date.
 
-Para discrecionales, dividir el importe mensual entero por los días del mes y repartir los céntimos restantes en sus últimos días. Solo se incluyen días del horizonte, incluido el gasto futuro supuesto para hoy. Mostrar este reparto como aproximación del presupuesto, no como movimientos del banco.
+For discretionary expenses, divide the integer monthly amount by the number of days in the month and distribute remaining cents over its final days. Include only days within the horizon, including assumed future spending today. Present this distribution as a budget approximation, not bank transactions.
 
-El motor utiliza fechas ISO y aritmética UTC. `observedAt` y `evaluatedAt` son timestamps reales. El front muestra la fecha enviada por el servidor; un POST posterior a un cambio de día vuelve a capturar hoy y devuelve su contexto actualizado. Si una fecha declarada ya quedó en el pasado, devuelve error por campo para corregirla.
+The engine uses ISO dates and UTC arithmetic. `observedAt` and `evaluatedAt` are actual timestamps. The frontend shows the date sent by the server; a POST after a day change captures today again and returns updated context. If a declared date has become past, return a field error so it can be corrected.
 
-Dinero en céntimos enteros seguros. Precio y reventa son positivos, hasta 10000000 céntimos como límite técnico del input. Presupuesto mensual admite importes no negativos con ese límite por campo. El colchón es un entero seguro no negativo. Las sumas se validan; las ratios se redondean solo para presentar.
+Money uses safe integer cents. Price and resale amounts are positive, up to 10000000 cents as a technical input limit. Monthly budget amounts are non-negative, with that limit per field. The reserve is a non-negative safe integer. Validate sums; round ratios only for presentation.
 
-### API y contrato compartido
+### API and shared contract
 
-Se conservan dos endpoints en el catch-all, con `Cache-Control: no-store`, sesión de cliente y 405 para métodos distintos de los previstos. La identidad procede de la cookie, nunca del body.
+Keep two endpoints in the catch-all, with `Cache-Control: no-store`, a customer session and 405 for unsupported methods. Identity comes from the cookie, never the body.
 
-`GET /api/spend-lab/context` devuelve `userId`, `observedAt`, `simulationStartDate`, `horizonEnd`, cuentas, actividad bancaria y cobertura/disponibilidad, `demoBudget` y versión de demo. La actividad visible puede limitarse a los cinco movimientos más recientes; no requiere una pantalla de histórico adicional.
+`GET /api/spend-lab/context` returns `userId`, `observedAt`, `simulationStartDate`, `horizonEnd`, accounts, bank activity and coverage/availability, `demoBudget` and demo version. Visible activity may be limited to the five most recent transactions; it does not require an additional history screen.
 
-`POST /api/spend-lab/evaluate` aplica `sameOrigin` y schemas Zod estrictos. Input:
+`POST /api/spend-lab/evaluate` applies `sameOrigin` and strict Zod schemas. Input:
 
-| Campo              | Contrato                                                                                                |
-| ------------------ | ------------------------------------------------------------------------------------------------------- |
-| `purchase`         | `{amountCents, motive, context}`; móvil como categoría fija.                                            |
-| `purchase.motive`  | `replace_broken`, `work_study`, `upgrade` o `treat`.                                                    |
-| `purchase.context` | Texto opcional de hasta 1000 caracteres; puede explicar qué móvil tiene y qué problema quiere resolver. |
-| `accountIds`       | IDs sin duplicados de las cuentas propias elegidas; máximo 12.                                          |
-| `budget`           | Null para el presupuesto de demo, o los cinco campos del presupuesto manual.                            |
-| `reserveCents`     | Entero no negativo o null si falta fijarlo.                                                             |
-| `resale`           | Null o `{amountCents, date}`, aportados por el usuario.                                                 |
+| Field              | Contract                                                                                                      |
+| ------------------ | ------------------------------------------------------------------------------------------------------------- |
+| `purchase`         | `{amountCents, motive, context}`; phone as the fixed category.                                                |
+| `purchase.motive`  | `replace_broken`, `work_study`, `upgrade` or `treat`.                                                         |
+| `purchase.context` | Optional text up to 1000 characters; may describe the existing phone and the problem the user wants to solve. |
+| `accountIds`       | Unique IDs of selected owned accounts; maximum 12.                                                            |
+| `budget`           | Null for the demo budget, or the five manual-budget fields.                                                   |
+| `reserveCents`     | Non-negative integer or null if not yet set.                                                                  |
+| `resale`           | Null or `{amountCents, date}`, supplied by the user.                                                          |
 
-El POST vuelve a consultar el banco. No acepta saldos, fecha de inicio, trayectorias o diagnósticos calculados por el navegador. El presupuesto y la venta previstos son inputs de simulación, no hechos bancarios.
+POST fetches the bank again. It does not accept balances, a start date, trajectories or diagnoses calculated by the browser. Expected budget and resale are simulation inputs, not bank facts.
 
-Con HTTP 200 se devuelve `needs_input` para cuentas, presupuesto o colchón ausentes, sin llamar al modelo; o `complete` con input normalizado, contexto actualizado, baseline, tres escenarios, métricas, metodología y `assessment`. Todas las respuestas incluyen `runId` y `userId`.
+HTTP 200 returns `needs_input` for missing accounts, budget or reserve, without calling the model; or `complete` with normalised input, updated context, baseline, three scenarios, metrics, methodology and `assessment`. All responses include `runId` and `userId`.
 
-Errores de forma, fechas e importes: 400 con campo asociado; sesión: 401; rol, origen o cuenta ajena: 403; forma inválida de cuentas bancarias: 502; indisponibilidad/timeout de cuentas: 503/504. Los errores de IA no eliminan cálculos válidos: `assessment.status: 'unavailable'` identifica la causa y permite reintentar. Un fixture propio inválido es un fallo de configuración; un cliente sin fixture necesita presupuesto manual.
+Shape, date and amount errors: 400 with an associated field; session: 401; role, origin or another person's account: 403; invalid bank account response shape: 502; account unavailability/timeout: 503/504. AI errors do not remove valid calculations: `assessment.status: 'unavailable'` identifies the cause and allows retrying. An invalid owned fixture is a configuration failure; a customer without a fixture needs a manual budget.
 
-### Tres escenarios y sacrificios calculados
+### Three scenarios and calculated sacrifices
 
-El baseline muestra el presupuesto sin cambiar de móvil; es una referencia de gráfica, no una cuarta alternativa interactiva. Se calculan:
+The baseline shows the budget without replacing the phone; it is a chart reference, not a fourth interactive alternative. Calculate:
 
-1. `buy_now`: pagar el precio hoy sin contar con ingresos de reventa. Así se ve el desembolso y el colchón que exige comprar de inmediato.
-2. `sell_first`: cobrar la venta prevista y después comprar el mismo día. Solo disponible si el usuario declara importe y fecha; depende de vender y cobrar antes. La venta no se acredita en el saldo inicial ni en los otros escenarios.
-3. `wait`: primer día entre mañana y el día 60 en que pagar sin reventa mantiene liquidez durante todo el horizonte y el colchón desde la compra. Si no existe, se muestra que no hay fecha viable dentro del horizonte.
+1. `buy_now`: pay the price today without counting resale proceeds. This exposes the outlay and reserve required to buy immediately.
+2. `sell_first`: receive the expected resale proceeds and then buy on the same day. Available only if the user declares an amount and date; it depends on selling and receiving payment first. Resale is not credited to the starting balance or other scenarios.
+3. `wait`: the first day between tomorrow and day 60 when paying without resale preserves liquidity throughout the entire horizon and the reserve from purchase onward. If none exists, report no viable date within the horizon.
 
-No se añade una variante separada de comprar y vender después. La comparación se limita a estas tres historias. Mover la fecha de venta desplaza compra y cobro de `sell_first` y recalcula sus efectos.
+Do not add a separate buy-then-sell variant. Comparison is limited to these three stories. Moving the resale date moves the purchase and receipt in `sell_first` and recalculates their effects.
 
-Saldo por evento: `saldo anterior + ingreso - gasto`. Se evalúan también saldos entre eventos: el cierre diario no puede ocultar un negativo intradía. Orden conservador: compromisos, compra e ingresos previstos; en `sell_first`, su venta se coloca inmediatamente antes de su compra. El orden es una hipótesis declarada, no un horario bancario verificado.
+Balance per event: `previous balance + income - expense`. Also evaluate balances between events: daily closing balance cannot hide an intraday negative balance. Conservative order: commitments, purchase and expected income; in `sell_first`, resale is placed immediately before its purchase. This order is a declared assumption, not verified banking timing.
 
-Cada escenario devuelve disponibilidad, fecha de compra, eventos, trayectoria, mínimo de todo el horizonte, mínimo desde la compra, saldo final y flags. Clasificación: `cash_shortfall` si hay cualquier saldo negativo; en caso contrario, `reserve_breach` si el mínimo posterior al pago cruza el colchón; si no, `within_limits`. Los problemas anteriores a la compra se muestran como preexistentes y se comparan con el baseline. Un escenario negativo o que compromete el colchón no puede presentarse como compatible con las condiciones elegidas.
+Each scenario returns availability, purchase date, events, trajectory, minimum over the full horizon, minimum from purchase onward, final balance and flags. Classification: `cash_shortfall` if any balance is negative; otherwise, `reserve_breach` if the minimum after payment falls below the reserve; otherwise, `within_limits`. Problems before the purchase are shown as preexisting and compared with the baseline. A scenario with a negative balance or compromised reserve cannot be presented as compatible with the chosen conditions.
 
-El colchón sugerido es tres meses de gastos esenciales, visible y editable; el POST usa el valor aceptado por el usuario, incluido cero explícito. Es una orientación metodológica, no una política del banco ni una frontera universal de responsabilidad.
+The suggested reserve is three months of essential expenses, visible and editable; POST uses the value accepted by the user, including explicit zero. This is methodological guidance, not bank policy or a universal boundary of responsibility.
 
-Para que el análisis explique sacrificios se calculan también:
+To explain sacrifices, also calculate:
 
-- Margen mensual: ingresos menos esenciales y discrecionales del presupuesto declarado o de demo.
-- Desembolso de renovación: precio, descontando reventa únicamente en `sell_first`, condicionado a cobrarla. No se presenta como rentabilidad del móvil.
-- Margen sacrificado: desembolso no negativo dividido por margen mensual positivo, expresado como equivalencia en meses; null si el margen no es positivo. No promete una fecha de recuperación.
-- Protección restante: diferencia frente al colchón y meses de esenciales cubiertos por el mínimo no negativo; null si los esenciales son cero.
+- Monthly room: income minus essential and discretionary expenses from the declared or demo budget.
+- Upgrade outlay: price, subtracting resale only in `sell_first`, conditional on receiving payment. Do not present it as the phone's financial return.
+- Room sacrificed: non-negative outlay divided by positive monthly room, expressed as an equivalent number of months; null when room is not positive. This does not promise a recovery date.
+- Remaining protection: difference relative to the reserve and months of essentials covered by the non-negative minimum; null when essentials are zero.
 
-Estas métricas y los flags se entregan a la IA con identificadores de evidencia. No se calcula una puntuación moral, una probabilidad de venta o un beneficio económico atribuido al móvil.
+Deliver these metrics and flags to AI with evidence identifiers. Do not calculate a moral score, probability of selling or economic benefit attributed to the phone.
 
-### Una llamada de IA con valor propio
+### One AI call with distinct value
 
-La IA debe elaborar tres cosas que la gráfica no explica por sí sola: qué pretende conseguir la persona con el móvil, qué margen o protección está sacrificando y qué reflexión específica le ayuda a decidir. Puede proponer comprar, vender primero, esperar o conservar el móvil actual, según los datos y el motivo.
+AI must develop three things the chart cannot explain on its own: what the person hopes to achieve with the phone, what financial room or protection they sacrifice and what specific reflection helps them decide. It may propose buying, selling first, waiting or keeping the current phone, depending on the data and motive.
 
-El input incluye motivo y contexto del usuario, presupuesto con procedencia, métricas y escenarios del motor, cobertura del histórico y una metodología breve versionada. Un móvil que falla para trabajar y uno que se quiere renovar por gusto pueden justificar lecturas distintas con las mismas cifras, sin suponer nuevos ingresos o funcionalidades del producto.
+Input includes the user's motive and context, budget with provenance, engine metrics and scenarios, historical coverage and a brief versioned methodology. A phone failing at work and one being upgraded for enjoyment can justify different interpretations with identical figures, without assuming new income or product features.
 
-Salida estructurada: `headline`, `motiveInterpretation`, `preferredScenarioId` nullable, `recommendation`, entre uno y dos `financialTradeoffs` y una `reflectionQuestion` obligatoria. Cada tradeoff referencia métricas/evidencias de esa evaluación. Límites: headline 100 caracteres, interpretación y recomendación 400 cada una, tradeoff 250 y pregunta 200. La preferencia referencia `baseline`, `buy_now`, `sell_first` o `wait` disponibles.
+Structured output: `headline`, `motiveInterpretation`, nullable `preferredScenarioId`, `recommendation`, one or two `financialTradeoffs` and a mandatory `reflectionQuestion`. Each tradeoff references metrics/evidence from that evaluation. Limits: headline 100 characters, interpretation and recommendation 400 each, tradeoff 250 and question 200. Preference references available `baseline`, `buy_now`, `sell_first` or `wait`.
 
-La interpretación distingue declaraciones del usuario de hipótesis. Puede decir que un cambio facilitaría una necesidad descrita; no afirma que aumentará ingresos, ahorrará horas o mejorará satisfacción sin evidencia. Si el contexto no identifica una necesidad concreta, la pregunta de reflexión explora ese punto en vez de rellenarlo. No inventa otro objetivo de ahorro que el usuario no haya mencionado.
+Interpretation distinguishes user declarations from assumptions. It may say a change could support a described need; it does not assert higher income, hours saved or greater satisfaction without evidence. If context does not identify a concrete need, the reflection question explores it rather than filling the gap. Do not invent a savings goal the user has not mentioned.
 
-Ejemplo de comportamiento esperado: con motivo de disfrute, explicar que es legítimo querer el móvil y concretar el margen que consume; con necesidad de trabajo, valorar esa necesidad y contrastar la urgencia con esperar o vender primero. La pregunta debe conectar con ese caso, no limitarse siempre a “¿realmente lo necesitas?”.
+Expected behaviour: for enjoyment, explain that wanting the phone is legitimate and specify the room it consumes; for work, consider that need and weigh urgency against waiting or selling first. The question must connect with the case rather than always asking “do you really need it?”.
 
-Se usa `openai().responses.parse()` con `zodTextFormat`, `config.chatModel`, `store: false`, esfuerzo bajo, máximo 1800 tokens, timeout de 30 segundos y cero reintentos para esta llamada. No se cambian defaults del cliente compartido. Una evaluación suficiente realiza una llamada; sin datos suficientes, ninguna. No hay loop de reparación, navegación o tools elegidas por el modelo.
+Use `openai().responses.parse()` with `zodTextFormat`, `config.chatModel`, `store: false`, low effort, a maximum of 1800 tokens, a 30-second timeout and zero retries for this call. Do not change shared-client defaults. An evaluation with sufficient data makes one call; insufficient data makes none. No repair loop, browsing or model-selected tools.
 
-Validar schema, referencias de evidencia y escenario preferido. El esquema enviado al modelo restringe los IDs de evidencia y las preferencias a los válidos para esa evaluación: conservar el móvil y alternativas de compra disponibles dentro de los límites. Cada métrica incluye unidades y significado; la diferencia positiva frente al colchón significa excedente, la negativa déficit. No aceptar una recomendación de compra que el motor marque como incompatible. La validación estructural no demuestra la corrección de toda frase libre: se comprueba además contenido con pruebas y revisión de demo. Refusal, timeout, incompatibilidad de formato, error del proveedor o output inválido dejan cifras y flags disponibles, sin fingir un análisis personalizado. [OpenAI Structured Outputs](https://developers.openai.com/api/docs/guides/structured-outputs?api-mode=responses).
+Validate the schema, evidence references and preferred scenario. The schema sent to the model restricts evidence IDs and preferences to those valid for the evaluation: keeping the phone and available purchase alternatives within the limits. Each metric includes units and meaning; a positive difference relative to the reserve means surplus, a negative one means deficit. Do not accept a purchase recommendation marked incompatible by the engine. Structural validation does not establish the correctness of every free-text sentence: also check content through tests and demo review. Refusal, timeout, format incompatibility, provider error or invalid output leave figures and flags available, without pretending to offer personalised analysis. [OpenAI Structured Outputs](https://developers.openai.com/api/docs/guides/structured-outputs?api-mode=responses).
 
-El conocimiento propio incluye resúmenes cortos y fuentes de [flujo de caja del CFPB](https://files.consumerfinance.gov/f/documents/cfpb_your-money-your-goals_cash_flow_budget_tool_2018-11_ADA.pdf), [colchón del Banco de España](https://clientebancario.bde.es/f/webcb/RCL/ActualidadEducacionFinanciera/EducacionFinanciera/QueSeHace/Actividades/02_Ahorro_y_objetivos.pdf), [bienestar financiero del CFPB](https://www.consumerfinance.gov/consumer-tools/financial-well-being/about/) y [elección bajo presupuesto de OpenStax](https://openstax.org/books/principles-economics-2e/pages/2-1-how-individuals-make-choices-based-on-their-budget-constraint). Son criterios y referencias externas, no condiciones de Banana Bank ni validación científica del algoritmo. No se modifica el corpus o índice RAG ni se necesita búsqueda web en runtime.
+Built-in knowledge includes short summaries and sources on [CFPB cash flow](https://files.consumerfinance.gov/f/documents/cfpb_your-money-your-goals_cash_flow_budget_tool_2018-11_ADA.pdf), [Banco de España emergency reserves](https://clientebancario.bde.es/f/webcb/RCL/ActualidadEducacionFinanciera/EducacionFinanciera/QueSeHace/Actividades/02_Ahorro_y_objetivos.pdf), [CFPB financial well-being](https://www.consumerfinance.gov/consumer-tools/financial-well-being/about/) and [OpenStax choice under a budget constraint](https://openstax.org/books/principles-economics-2e/pages/2-1-how-individuals-make-choices-based-on-their-budget-constraint). These are external principles and references, not Banana Bank conditions or scientific validation of the algorithm. Do not modify the RAG corpus or index; runtime web search is unnecessary.
 
-### Validación y trazas
+### Validation and tracing
 
-Reutilizar `traceLog` con scope `spend-lab`, runId, actor, duración, versión de demo/metodología, flags y estado del análisis. No se crean conversaciones, intents, aprobaciones, tablas, workers o runs durables. El resultado y las trazas relacionan la solicitud; no se desarrolla historial de decisiones.
+Reuse `traceLog` with scope `spend-lab`, runId, actor, duration, demo/methodology version, flags and analysis status. Do not create conversations, intents, approvals, tables, workers or durable runs. Results and traces correlate the request; do not develop decision history.
 
-Pruebas con `node:test` y dependencias inyectables, sin nuevos puertos:
+Tests use `node:test` and injectable dependencies, without new ports:
 
-- Reloj actual e inyectado, cambio de mes/día y fechas independientes de `referenceDate`; ningún evento proyectado queda antes del inicio.
-- Céntimos y sumas, pagos antes de cobro, mínimo intradía, colchón exacto o comprometido y presupuesto de margen cero.
-- Las tres alternativas, venta hipotética, espera sin fecha viable y problemas que ya estaban en baseline.
-- Lucía con demo y otros clientes manuales; fuentes diferenciadas e históricos no reaplicados.
-- Sesión, titularidad y errores bancarios; histórico no disponible sin inventarlo y saldo obligatorio.
-- Una llamada de IA, ausencia de llamada con datos incompletos, output inválido y fallback.
-- Dos motivos distintos con las mismas cifras: lectura y reflexión contextualizadas, tradeoffs ligados a métricas y ningún beneficio inventado.
-- Ausencia de POST bancarios y escrituras en conversaciones, intents o aprobaciones.
+- Current and injected clock, month/day changes and dates independent of `referenceDate`; no projected event occurs before the start.
+- Cents and sums, payments before receipt, intraday minimum, exact or compromised reserve and a zero-room budget.
+- Three alternatives, hypothetical resale, waiting without a viable date and problems already present in the baseline.
+- Lucía with demo and other customers with manual budgets; distinct sources and no reapplication of history.
+- Session, ownership and banking errors; unavailable history without inventing it, and mandatory balance.
+- One AI call, no call with incomplete data, invalid output and fallback.
+- Two different motives with identical figures: contextual interpretation and reflection, tradeoffs tied to metrics and no invented benefit.
+- No bank POSTs or writes to conversations, intents or approvals.
 
-Fixture de ejemplo con fecha fija `2026-10-09`: saldo 300000, ingresos mensuales 200000 con próximo cobro el 20, esenciales 80000 con próximo pago el 10, discrecionales cero, móvil 100000 y colchón 150000. Comprar hoy tiene mínimo de 120000. Vender por 50000 el día 16 y comprar después mantiene mínimo de 170000. Esperar encuentra el día 21: el cobro del 20 no puede financiar una compra que el orden conservador coloca antes de ese cobro. El test recorre los 90 días completos, no solo el primer mes.
+Example fixture with fixed date `2026-10-09`: balance 300000, monthly income 200000 with next receipt on the 20th, essentials 80000 with next payment on the 10th, zero discretionary spending, phone 100000 and reserve 150000. Buying today has a minimum of 120000. Selling for 50000 on the 16th and buying afterwards keeps a minimum of 170000. Waiting finds the 21st: income on the 20th cannot fund a purchase placed before that receipt by the conservative order. The test covers the full 90 days, not only the first month.
 
-## V1.1 · Cambios implementados, pendientes de revisión
+## V1.1 · Implemented changes, awaiting review
 
-### Contrato de compra concreto y compatibilidad
+### Specific purchase contract and compatibility
 
-Se conservan `GET /api/spend-lab/context` y `POST /api/spend-lab/evaluate`, autenticación, validaciones financieras, estados `needs_input`/`complete` y fallback. No se crean rutas por categoría ni otro workflow.
+Keep `GET /api/spend-lab/context` and `POST /api/spend-lab/evaluate`, authentication, financial validations, `needs_input`/`complete` states and fallback. Do not create category-specific routes or another workflow.
 
-El nuevo input de `purchase` incorpora dos campos:
+The new `purchase` input adds two fields:
 
-| Campo                              | Regla V1.1                                                                                                                                                                           |
-| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `category`                         | Enum `mobile`, `computer`, `gaming`, `other_tech`. Corresponden a móviles, ordenadores, gaming/consolas y otros dispositivos tecnológicos.                                           |
-| `productName`                      | Texto declarado, trim, de 1 a 160 caracteres. Puede ser modelo exacto o una descripción concreta: “portátil para edición que estoy valorando”. Sin catálogo ni verificación externa. |
-| `amountCents`, `motive`, `context` | Conservan las reglas V1: precio positivo, cuatro motivos y contexto opcional de hasta 1000 caracteres.                                                                               |
+| Field                              | V1.1 rule                                                                                                                                                                          |
+| ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `category`                         | Enum `mobile`, `computer`, `gaming`, `other_tech`. These correspond to phones, computers, gaming/consoles and other technology devices.                                            |
+| `productName`                      | Declared, trimmed text, 1 to 160 characters. May be an exact model or a concrete description: “a laptop for editing that I am considering”. No catalogue or external verification. |
+| `amountCents`, `motive`, `context` | Keep V1 rules: positive price, four motives and optional context up to 1000 characters.                                                                                            |
 
-La nueva interfaz exige categoría y producto. Para preservar las solicitudes válidas de V1, el schema compartido acepta también la forma anterior sin ninguno de esos campos: se normaliza como `category: 'mobile'`, `productName: null`, sin inventar un modelo. Si llega cualquiera de los campos nuevos, se exige la pareja completa; no se convierte una categoría inválida o un nombre vacío en una petición legacy. Las claves desconocidas siguen rechazándose. No hace falta versionar la URL; los tests V1 conservan sus payloads y resultados.
+The new interface requires category and product. To preserve valid V1 requests, the shared schema also accepts the previous shape with neither field: normalise it to `category: 'mobile'`, `productName: null`, without inventing a model. If either new field is supplied, require the complete pair; an invalid category or empty name must not become a legacy request. Unknown keys are still rejected. URL versioning is unnecessary; V1 tests retain their payloads and results.
 
-Los tipos normalizados deben llevar esos campos hasta respuesta y `buildInterpretationInput`. El schema de entrada del cálculo compartido debe admitir los metadatos normalizados; el algoritmo de `engine.ts` sigue usando importe, saldo, presupuesto, colchón y venta. No se introducen reglas financieras por categoría. Precio/motivo/contexto de una solicitud V1 mantienen el mismo comportamiento; los nuevos clientes envían la forma V1.1 completa.
+Normalised types must carry these fields through to the response and `buildInterpretationInput`. The shared calculation input schema must accept normalised metadata; the `engine.ts` algorithm still uses amount, balance, budget, reserve and resale. Do not introduce category-specific financial rules. Price/motive/context in V1 requests retain the same behaviour; new clients send the complete V1.1 shape.
 
-### Evidencia bancaria para preparar el presupuesto
+### Bank evidence for budget preparation
 
-`context.ts` conserva la lectura HTTP de cuentas y movimientos, titularidad y separación de fuentes. Antes de reducir la actividad visible a cinco movimientos, una función pura resume todos los movimientos válidos devueltos, como máximo 100. No consulta SQLite del simulador, no genera filas ni utiliza importes específicos por cliente.
+`context.ts` keeps HTTP reads of accounts and transactions, ownership and source separation. Before reducing visible activity to five transactions, a pure function summarises all valid returned transactions, at most 100. It does not query simulator SQLite, generate rows or use customer-specific amounts.
 
-El contexto se amplía con `budgetEvidence`, identificado como `source: 'bank'`, con cobertura y grupos por cuenta/mes UTC. Cada grupo contiene `accountId`, `month` (`YYYY-MM`), `creditsCents`, `debitsCents` (magnitud positiva), `movementCount`, `from` y `to`. Solo se crean grupos con movimientos observados; la ausencia de un mes no se convierte en un mes de gasto cero. Sumas en céntimos seguros; si no se pueden resumir con fiabilidad, la evidencia se marca no disponible sin sustituirla por demo.
+Extend context with `budgetEvidence`, identified as `source: 'bank'`, with coverage and groups by account/UTC month. Each group contains `accountId`, `month` (`YYYY-MM`), `creditsCents`, `debitsCents` (positive magnitude), `movementCount`, `from` and `to`. Create groups only for observed transactions; a missing month does not become a zero-spending month. Sums use safe cents; when reliable summarisation is impossible, mark evidence unavailable without replacing it with demo data.
 
-La cobertura conserva disponibilidad, límite, conteo, fechas y posible truncamiento del histórico. `available` significa que la lectura fue válida, no que el mes esté completo. La selección de cuentas determina qué grupos se muestran y cuáles se incluyen en el payload del LLM; el límite de 100 se aplica a la lectura conjunta del cliente y puede dejar fuera movimientos de las cuentas elegidas. El POST refresca el resumen junto con el resto del contexto.
+Coverage retains availability, limit, count, dates and possible history truncation. `available` means the read was valid, not that a month is complete. Account selection determines which groups are shown and included in the LLM payload; the 100 limit applies to the customer's combined read and may exclude transactions from selected accounts. POST refreshes the summary alongside the rest of the context.
 
-Entradas/salidas observadas no se llaman nómina/gastos de consumo: pueden incluir saldo de apertura y transferencias. No se deduce su naturaleza por palabras en `description` ni se reconstruyen transferencias incompletas. Se muestran estas limitaciones. No hay promedios mensuales extrapolados, detector de recurrencias, clasificación con IA o fechas futuras deducidas del histórico.
+Observed inflows/outflows are not called salary/consumption expenses: they may include opening balances and transfers. Do not infer their nature from words in `description` or reconstruct incomplete transfers. Show these limitations. No extrapolated monthly averages, recurrence detector, AI classification or future dates inferred from history.
 
-La evidencia ayuda a revisar los mismos cinco campos V1, pero no los sustituye ni se suma otra vez a la proyección. Esos campos son un presupuesto previsto `user`, confirmado por el cliente. Se conservan importes cero explícitos y las reglas de próximas fechas. Si faltan cuentas, presupuesto o colchón, `needs_input` impide interpretar; un histórico vacío o no disponible no impide calcular con saldo y presupuesto suficientes.
+Evidence helps review the same five V1 fields, but does not replace them or get added to the projection again. Those fields are a forecast `user` budget confirmed by the customer. Keep explicit zero amounts and upcoming-date rules. If accounts, budget or reserve are missing, `needs_input` prevents interpretation; empty or unavailable history does not prevent calculation with sufficient balance and budget.
 
-`demoBudget` puede seguir ofreciéndose exclusivamente para Lucía como ejemplo opcional. Su ausencia o invalidez no debe bloquear contexto bancario ni una evaluación con presupuesto declarado: se identifica el ejemplo como no disponible. Un null sin ejemplo válido solicita presupuesto. El recorrido nuevo no envía `budget: null` por defecto: envía el presupuesto revisado. Cargar explícitamente el ejemplo válido mantiene el comportamiento V1 de null/demo; editarlo produce un objeto/user. Para cualquier otro cliente null sigue devolviendo `needs_input`. Se conserva el contrato válido sin crear perfiles ni defaults hardcodeados. La API usa el actor, no una lista fija de ocho IDs, para dar acceso a todos los clientes existentes.
+`demoBudget` may still be offered exclusively to Lucía as an optional example. Its absence or invalidity must not block banking context or an evaluation with a declared budget: identify the example as unavailable. Null without a valid example requests a budget. The new flow does not send `budget: null` by default: it sends the reviewed budget. Explicitly loading the valid example retains V1 null/demo behaviour; editing it produces an object/user. For any other customer, null still returns `needs_input`. Preserve the valid contract without creating profiles or hardcoded defaults. The API uses the actor, not a fixed list of eight IDs, to grant access to all existing customers.
 
-### Interpretación más útil dentro del mismo workflow
+### More useful interpretation within the same workflow
 
-El pipeline sigue siendo validación → contexto → gate → cálculo → interpretación → validación de salida. La única ampliación de contexto es producto/categoría y evidencia observada; no se añade un step de clasificación o de investigación del producto.
+The pipeline remains validation → context → gate → calculation → interpretation → output validation. The only context additions are product/category and observed evidence; do not add a classification or product-research step.
 
-`buildInterpretationInput` envía categoría, nombre, precio, motivo y contexto declarado, presupuesto y fuentes, escenarios, métricas con IDs y significado, cobertura y resumen bancario de las cuentas elegidas. Se conserva la exclusión de IBAN, identidad y trayectorias completas del payload del modelo. Si el resumen se utiliza para una afirmación numérica, debe tener un ID de evidencia bancaria propio; no se mezcla con las métricas del presupuesto ni se presenta como previsión.
+`buildInterpretationInput` sends category, name, price, motive and declared context, budget and sources, scenarios, metrics with IDs and meaning, coverage and a banking summary for selected accounts. Continue excluding IBAN, identity and complete trajectories from the model payload. If a summary supports a numerical claim, it must have its own banking evidence ID; do not mix it with budget metrics or present it as a forecast.
 
-Se conserva la salida estructurada actual, sin añadir campos que repitan su contenido:
+Keep the current structured output without adding fields that repeat its content:
 
-| Campo de salida                         | Responsabilidad en V1.1                                                     |
-| --------------------------------------- | --------------------------------------------------------------------------- |
-| `headline`                              | Introducir la decisión sobre el producto, sin dictar un juicio moral.       |
-| `motiveInterpretation`                  | Qué busca comprar, por qué y qué utilidad podría tener según lo contado.    |
-| `financialTradeoffs`                    | Una o dos consecuencias financieras verificables, con evidencia.            |
-| `preferredScenarioId`, `recommendation` | Explicar qué alternativa encaja y qué otras opciones condicionales valorar. |
-| `reflectionQuestion`                    | Pregunta concreta sobre la utilidad, urgencia o sacrificio de este caso.    |
+| Output field                            | V1.1 responsibility                                                                      |
+| --------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `headline`                              | Introduce the product decision without imposing a moral judgement.                       |
+| `motiveInterpretation`                  | What the person wants to buy, why and how it could be useful according to their account. |
+| `financialTradeoffs`                    | One or two verifiable financial consequences, with evidence.                             |
+| `preferredScenarioId`, `recommendation` | Explain which alternative fits and what other conditional options to consider.           |
+| `reflectionQuestion`                    | A concrete question about usefulness, urgency or sacrifice in this case.                 |
 
-Se actualizan instrucciones y significados que hoy dicen “phone”. `baseline` pasa a significar no realizar esta compra; no presupone que ya se tenga un producto equivalente. Reventa significa vender un dispositivo que la persona declara tener, sin asumir que está reemplazando uno. Los textos del usuario, incluidos nombre de producto y descripciones bancarias, son datos no confiables, nunca instrucciones.
+Update instructions and meanings currently referring to “phone”. `baseline` now means not making this purchase; it does not assume ownership of an equivalent product. Resale means selling a device the person declares they own, without assuming replacement. User text, including product name and banking descriptions, is untrusted data, never instructions.
 
-El nombre de un modelo no autoriza afirmar especificaciones, compatibilidad, rendimiento, precio de mercado, descuentos o reventa. Tampoco se infieren profesión, ingresos futuros, satisfacción o disponibilidad de otro dispositivo. Si la persona declara que su ordenador falla al trabajar, se valora ese problema como declaración; no se promete que comprar el propuesto lo resuelva. Si solo escribe “quiero una consola”, se pregunta sobre el uso esperado sin inventarlo.
+A model name does not authorise claims about specifications, compatibility, performance, market price, discounts or resale. Do not infer profession, future income, satisfaction or availability of another device either. If the person declares their computer fails during work, consider that problem as a declaration; do not promise the proposed purchase will solve it. If they only write “I want a console”, ask about expected use without inventing it.
 
-Las alternativas numéricas siguen restringidas a las disponibles y compatibles con el motor. Conservar algo que el usuario dice tener, explorar reparación o una opción más económica son ideas condicionales, sin costes, ahorros o escenarios calculados adicionales. No se ofrece financiación. El disfrute sigue siendo un motivo válido y los problemas financieros preexistentes permanecen visibles.
+Numerical alternatives remain restricted to those available and compatible with the engine. Keeping something the user says they own, exploring repair or considering a cheaper option are conditional ideas, without additional calculated costs, savings or scenarios. Do not offer financing. Enjoyment remains a valid motive and preexisting financial problems remain visible.
 
-Se reutilizan `responses.parse`, modelo configurado, `store: false`, límites actuales, una llamada y cero reintentos. Se conservan IDs válidos, preferencias compatibles y fallback. Los límites actuales permiten una reflexión breve; primero se mide la calidad con ejemplos antes de proponer otro modelo, más tokens, otra llamada o un loop. El esquema no certifica la verdad de frases libres: las pruebas y la revisión deben comprobar personalización y ausencia de datos inventados.
+Reuse `responses.parse`, the configured model, `store: false`, current limits, one call and zero retries. Keep valid IDs, compatible preferences and fallback. Current limits allow a brief reflection; measure quality with examples before proposing another model, more tokens, another call or a loop. The schema does not certify the truth of free text: tests and review must check personalisation and absence of invented data.
 
-### Superficie de cambio y pruebas
+### Change surface and tests
 
-Archivos afectados: `contracts.ts` (compra raw/normalizada y evidencia), `context.ts`, los helpers puros `activity.ts` e `insights.ts`, `budget.ts` (ejemplo inválido opcional), `interpretation.ts`, `workflow.ts`, texto neutral y versión `spend-lab-method-v1.1` en `methodology.ts` y tests de SpendLab. `engine.ts` conserva sus reglas y cifras. No se modifica auth, catch-all, simulador, agente, SQLite o transferencias.
+Affected files: `contracts.ts` (raw/normalised purchase and evidence), `context.ts`, pure helpers `activity.ts` and `insights.ts`, `budget.ts` (optional invalid example), `interpretation.ts`, `workflow.ts`, neutral wording and version `spend-lab-method-v1.1` in `methodology.ts`, and SpendLab tests. `engine.ts` retains its rules and figures. Do not modify auth, catch-all, simulator, agent, SQLite or transfers.
 
-El cierre de V1.1 devuelve en `complete.evidence` las mismas evidencias suministradas a la única llamada del modelo, para resolver los `evidenceIds` en pantalla. `insights.ts` lee los eventos, balances y fechas existentes para localizar el primer saldo negativo o cruce de colchón aplicable; no genera proyecciones ni modifica fórmulas. Incluye el evento, saldo previo/posterior y comparación con el baseline ese día, distinguiendo problemas iniciales y preexistentes. Los esenciales siguen siendo un agregado mensual declarado, nunca un recibo identificado.
+The V1.1 closure returns in `complete.evidence` the same evidence supplied to the single model call, to resolve `evidenceIds` on screen. `insights.ts` reads existing events, balances and dates to locate the first applicable negative balance or reserve breach; it does not generate projections or change formulas. It includes the event, balance before/after and comparison with baseline on that day, distinguishing initial and preexisting problems. Essentials remain a declared monthly aggregate, never an identified bill.
 
-La interpretación recibe ese primer problema y sus IDs de fecha, saldo e importe cuando existe. El prompt conecta uso personal, sacrificio y alternativa; explica qué ocurre al comprar ahora contra la recomendación y permite recomendar un capricho compatible. Se mantiene una llamada, el modelo y los límites actuales.
+Interpretation receives that first problem and its date, balance and amount IDs when present. The prompt connects personal use, sacrifice and alternative; it explains what happens when buying now against the recommendation and allows recommending a compatible treat. Keep one call, the model and current limits.
 
-El último ajuste de claridad añade `firstBudgetProblem` derivado de todo el horizonte, incluidos los cruces de colchón anteriores a comprar, y evidencias de fecha/saldo. `firstProblem` conserva el alcance de la clasificación original; no se modifica `engine.ts`. `within_limits` exige saldo no negativo en todo el horizonte y colchón desde la compra, no durante todo el periodo previo. Los flags de problema preexistente no prueban que comprar no lo empeore. La IA debe reconocer el riesgo anterior y usar cifras/fechas simples; no cita ratios en meses. Las fuentes se deduplican. La respuesta de metodología separa `principles` generales de `assumptions` de la simulación: 90/60 días, recurrencia, agrupación/reparto y orden conservador son decisiones nuestras; tres meses de esenciales es una sugerencia simplificada, editable.
+The final clarity adjustment adds `firstBudgetProblem`, derived from the full horizon, including reserve breaches before buying, and date/balance evidence. `firstProblem` retains the original classification scope; do not modify `engine.ts`. `within_limits` requires non-negative balance throughout the horizon and the reserve from purchase onward, not throughout the preceding period. Preexisting-problem flags do not prove that buying cannot worsen it. AI must acknowledge earlier risk and use simple figures/dates; it does not cite ratios in months. Sources are deduplicated. The methodology response separates general `principles` from simulation `assumptions`: 90/60 days, recurrence, aggregation/distribution and conservative ordering are our decisions; three months of essentials is a simplified, editable suggestion.
 
-- Mantener escenarios y payloads legacy de V1; misma proyección al cambiar únicamente categoría, nombre, motivo o contexto.
-- Evaluar para todos los clientes de `src/people.ts`, sin presupuesto de demo, mediante lecturas bancarias inyectadas y presupuesto declarado. No crear fixtures de perfiles para cada persona.
-- Resumen con movimientos reales parciales, antiguos, apertura, transferencias, cuentas seleccionadas, límite global, mes ausente y fallo exclusivo de histórico. Sin inferir nómina ni duplicar movimientos proyectados.
-- Categorías válidas, nombre vacío/largo, pareja incompleta, campos desconocidos y producto enviado íntegro al modelo. Motivo sin beneficio declarado produce una pregunta, no una característica inventada.
-- Mismos números para ordenador con necesidad laboral declarada y móvil por disfrute: lectura/pregunta distintas; gaming y otros dispositivos con utilidad personal contextualizada. Incluir un caso sin dispositivo anterior y otro con contexto escaso.
-- Una llamada o ninguna cuando falten datos; fallback y preferencias compatibles. Las pruebas deterministas verifican contrato/payload/reglas; una evaluación con el modelo real y revisión humana comprueban el contenido, sin presentarlo como garantía universal.
+- Preserve V1 scenarios and legacy payloads; identical projections when changing only category, name, motive or context.
+- Evaluate for every customer in `src/people.ts`, without a demo budget, using injected banking reads and a declared budget. Do not create profile fixtures for each person.
+- Summaries with actual partial/old transactions, opening balances, transfers, selected accounts, global limit, missing month and history-only failure. No inferred salary or duplicated projected transactions.
+- Valid categories, empty/long name, incomplete pair, unknown fields and product sent in full to the model. A motive without a declared benefit produces a question, not an invented feature.
+- Same figures for a computer with a declared work need and a phone for enjoyment: distinct interpretation/question; gaming and other devices with contextual personal usefulness. Include a case without a previous device and another with sparse context.
+- One call, or none when data is missing; fallback and compatible preferences. Deterministic tests verify contract/payload/rules; evaluation with the actual model and human review check content without presenting it as a universal guarantee.
 
-### Historial · Propuesta separada, pendiente de decisión
+### History · Separate proposal, pending a decision
 
-V1 y la propuesta base V1.1 no guardan decisiones. `runId` y logs no son almacenamiento recuperable; el workflow no abre `appDb()` y la salida del modelo utiliza `store: false`. No hay endpoints para listar, recuperar o comparar.
+V1 and the base V1.1 proposal do not save decisions. `runId` and logs are not retrievable storage; the workflow does not open `appDb()` and model output uses `store: false`. There are no endpoints to list, retrieve or compare evaluations.
 
-Si se aprueba un historial posterior, se reutilizaría la SQLite de la aplicación con una tabla específica de evaluaciones y acceso por `user_id`. Esto modifica `src/db.ts`, añade un repositorio en `src/spend-lab/`, rutas autorizadas de lista/detalle y el guardado del resultado completo en el workflow. No se escribe en el banco ni se reutilizan tablas de runs conversacionales, conversaciones, mensajes, intents o aprobaciones.
+If later history is approved, reuse the application's SQLite with a dedicated evaluations table and access by `user_id`. This modifies `src/db.ts`, adds a repository in `src/spend-lab/`, authorised list/detail routes and saving the complete result in the workflow. Do not write to the bank or reuse conversational runs, conversations, messages, intents or approvals tables.
 
-El registro mínimo necesitaría ID, cliente, fecha de evaluación, versión de contrato/cálculo/metodología/prompt y modelo, input normalizado y snapshot de saldo seleccionado, presupuesto, fechas, cálculo y assessment. Guardar solo input y texto de IA no permite consultar las cifras originales si cambian saldo o algoritmo. Debe almacenarse solo el contexto necesario, evitando copiar IBAN y toda la actividad del cliente. Un resultado `complete` con IA no disponible también puede ser consultable; `needs_input` y previews no son decisiones completas. Política de guardado pendiente, sin implementarla aquí.
+The minimum record would need ID, customer, evaluation date, contract/calculation/methodology/prompt version and model, normalised input and a snapshot of selected balance, budget, dates, calculation and assessment. Saving only input and AI text cannot recover original figures if balance or algorithm changes. Store only necessary context, avoiding copies of IBAN and all customer activity. A `complete` result with unavailable AI may also be viewable; `needs_input` and previews are not complete decisions. Saving policy remains pending and is not implemented here.
 
-Cada lectura se filtra por actor; una referencia a otra persona no revela su decisión. Recuperar reutiliza inputs editables, comprueba propiedad actual de las cuentas y refresca saldo/reloj; obliga a revisar fechas pasadas y supuestos. La nueva evaluación no sobrescribe la anterior. Un vínculo al registro original permitiría comparar ambas sin tratar el snapshot antiguo como actual.
+Filter each read by actor; a reference to someone else must not reveal their decision. Recovery reuses editable inputs, checks current account ownership and refreshes balance/clock; it requires reviewing past dates and assumptions. The new evaluation does not overwrite the previous one. A link to the original record would allow comparing both without treating the old snapshot as current.
 
-La comparación mínima puede devolver precio, saldo, presupuesto, colchón, fechas, métricas y análisis de ambos registros, mostrando cambios de condiciones y versión. No requiere otra llamada al modelo ni superponer curvas con fechas distintas. La consulta histórica no necesita recalcular ni pagar una llamada. No se garantiza reproducir literalmente la antigua reflexión al reevaluar.
+Minimal comparison can return price, balance, budget, reserve, dates, metrics and analysis for both records, showing condition and version changes. It does not require another model call or overlapping curves with different dates. Viewing history does not require recalculation or paying for a call. Reevaluation does not guarantee reproducing the old reflection verbatim.
 
-Complejidad adicional media: schema/compatibilidad de registros, autorización, errores de escritura, retención/borrado, recuperación de datos obsoletos y pruebas de aislamiento/comparación. Habría que definir también qué hace reset con la tabla nueva sin alterar el comportamiento existente por accidente. Un fallo de guardado debe distinguirse de un fallo de evaluación; este estado nuevo necesita contrato e interfaz.
+Additional medium complexity: schema/record compatibility, authorisation, write errors, retention/deletion, stale-data recovery and isolation/comparison tests. Also define how reset handles the new table without accidentally changing existing behaviour. A saving failure must be distinguished from an evaluation failure; this new state needs a contract and interface.
 
-Recomendación: entregar primero V1.1 sin persistencia y considerar el historial como V1.2. Pendientes de aprobación: adelantarlo o posponerlo, guardado explícito/automático, snapshot y versiones, retención/borrado y comparación en la primera entrega o después. No se añaden tabla, dependencia, endpoint o cambio de reset antes de cerrar esas decisiones.
+Recommendation: deliver V1.1 without persistence first and consider history as V1.2. Pending approval: bring it forward or postpone it, explicit/automatic saving, snapshot and versions, retention/deletion, and comparison in the first delivery or later. Do not add a table, dependency, endpoint or reset change before resolving those decisions.
